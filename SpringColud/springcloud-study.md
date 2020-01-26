@@ -1603,6 +1603,712 @@ public interface IHelloRemote {
 
 [断路器聚合监控(Hystrix Turbine)](http://cmsblogs.com/?p=5553)
 
+# 二、配置中心
+
+## 1、Spring Cloud Config配置中心
+
+### 1.1、简介
+
+> `Spring Cloud Config`是`Spring Cloud`团队创建的一个全新项目，**用来为分布式系统中的基础设施和微服务应用提供集中化的外部配置支持**。**其中`服务端`（`config server`）也称为分布式配置中心，它是一个独立的微服务应用，用来连接配置仓库并为客户端提供获取配置信息、加密 / 解密信息等访问接口**；**而`客户端`（`config client`）则是微服务架构中的各个微服务应用或基础设施，它们通过指定的配置中心来管理应用资源与业务相关的配置内容，并在启动的时候从配置中心获取和加载配置信息**。Spring Cloud Config 实现了对服务端和客户端中环境变量和属性配置的抽象映射，所以它**除了适用于 Spring 构建的应用程序之外，也可以在任何其他语言运行的应用程序中使用**。由于 Spring Cloud Config 实现的配置中心默认采用 Git 来存储配置信息，所以使用 Spring Cloud Config 构建的配置服务器，天然就支持对微服务应用配置信息的版本管理，并且可以通过 Git 客户端工具来方便的管理和访问配置内容。
+
+在分布式系统中，由于服务量居多，**为了方便服务配置统一管理，实时更新，所以需要分布式配置中心组件**。在`Spring Cloud`中，有分布式配置中心组件`spring cloud config`，它支持配置文件信息放在配置服务的内存中（即本地），也支持放在远程Git仓库（github、码云）。在`spring cloud config` 组件中，分两个角色，一是`config server`，二是`config client`。
+
+`Spring Cloud Config`项目是**一个解决分布式系统的配置信息管理方案**。它包含了`client`和`server`两个部分。
+
+- `config server`（服务端）
+
+  `server`一个独立的微服务应用，**提供配置文件的存储、以接口的形式将配置文件的内容提供出去**。
+
+- `config client`（客户端）
+
+  `client`是微服务架构中的各个微服务应用或基础设施，**通过接口获取数据、并依据此数据初始化自己的应用**。
+
+简单来说，使用`Spring Cloud Config`就是将配置文件放在统一的位置管理（比如github、码云、本地磁盘），客户端通过服务端提供的接口去获取这些配置文件。
+
+**Spring Cloud Config其他的知识**：
+
+-  在`Spring Cloud Config`的服务端，对于配置仓库的默认实现采用Git，也可以配置SVN。
+- 客户端获取服务端的配置文件是加密和解密的。
+- 修改了配置文件，希望不用重启来动态刷新配置，可以配合`Sping Cloud Bus`使用。
+- 可以提供不同版本的管理。
+- 可以支持不同的语言
+- 高可用（防止意外宕机导致配置不可用）
+
+**使用Spring Cloud Config配置中心后的架构如下图**：
+
+![image-20200114213854730](.\img\image-20200114213854730.png)
+
+### 1.2、准备工作
+
+准备一个 Git 仓库，在 Github 上面创建了一个文件夹 config-repo 用来存放配置文件，为了模拟生产环境，我们创建以下三个配置文件：
+
+```
+// 开发环境
+config-client-dev.yml
+// 测试环境
+config-client-test.yml
+// 生产环境
+config-client-prod.yml
+
+```
+
+每个配置文件中都写一个属性 neo.hello, 属性值分别是 dev/test/prod。下面我们开始配置 Server 端。
+
+### 1.3、Config Server端
+
+创建一个基础的 Spring Boot 工程，命名为：config-server-git
+
+#### 1.3.1、添加依赖
+
+```xml
+<?xml version="1.0" encoding="UTF-1"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.jjcc</groupId>
+        <artifactId>springcloud-study</artifactId>
+        <version>0.0.1-SNAPSHOT</version>
+        <relativePath/> <!-- lookup parent from repository -->
+    </parent>
+    <groupId>com.config</groupId>
+    <artifactId>config-server-git</artifactId>
+    <version>0.0.1-SNAPSHOT</version>
+    <name>config-server-git</name>
+    <description>Demo project for Spring Boot</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-config-server</artifactId>
+        </dependency>
+
+    </dependencies>
+
+</project>
+
+```
+
+#### 1.3.2、配置文件
+
+在 application.yml 中添加配置服务的基本信息以及 Git 仓库的相关信息
+
+```yml
+server:
+  port: 1200
+
+spring:
+  application:
+    name: config-server
+  cloud:
+    config:
+      server:
+        git:
+          uri: https://github.com/jjcc123312/springcloud-study.git # Git仓库地址
+          search-paths: springcloud-config    # Git仓库目录
+#          username:    # git账号
+#          passphrase:  # git密码
+      label: master     # 配置仓库的分支
+```
+
+- `spring.cloud.config.server.git.uri`：配置git仓库地址
+- `spring.cloud.config.server.git.searchPaths`：配置仓库路径
+- `spring.cloud.config.label`：配置仓库的分支
+- `spring.cloud.config.server.git.username`：访问git仓库的用户名
+- `spring.cloud.config.server.git.password`：访问git仓库的用户密码
+
+> 如果Git仓库为公开仓库，可以不填写用户名和密码，如果是私有仓库需要填写
+
+Spring Cloud Config 也提供本地存储配置的方式。我们只需要设置属性 `spring.profiles.active=native`，Config Server 会默认从应用的 `src/main/resource` 目录下检索配置文件。也可以通过 `spring.cloud.config.server.native.searchLocations=file:E:/properties/` 属性来指定配置文件的位置。虽然 Spring Cloud Config 提供了这样的功能，但是为了支持更好的管理内容和版本控制的功能，还是推荐使用 Git 的方式。
+
+#### 1.3.3、启动类
+
+启动类添加 `@EnableConfigServer`，激活对配置中心的支持
+
+```java
+@SpringBootApplication
+@EnableConfigServer
+public class ConfigServerGitApplication {
+
+    public static void main(String[] args) {
+        SpringApplication.run(ConfigServerGitApplication.class, args);
+    }
+
+}
+```
+
+#### 1.3.4、测试
+
+首先我们先要测试 Server 端是否可以读取到 github 上面的配置信息，直接访问 http://localhost:12000/config-client/dev 返回信息如下：
+
+```json
+{
+  "name": "config-client",
+  "profiles": ["dev"],
+  "label": null,
+  "version": "4e3ca4b9e2bb96c9a0ba012f6c6e0b6cadc48f3e",
+  "state": null,
+  "propertySources": [
+    {
+      "name": "https://github.com/zhaoyibo/spring-cloud-study/config-repo/config-client-dev.yml",
+      "source": {
+        "info.profile": "dev"
+      }
+    }
+  ]
+}
+```
+
+上述的返回的信息包含了配置文件的位置、版本、配置文件的名称以及配置文件中的具体内容，说明 Server 端已经成功获取了 Git 仓库的配置信息。
+
+如果直接查看配置文件中的配置信息可访问 http://localhost:12000/config-client-dev.yml 返回：
+
+```
+info:
+  profile: dev
+```
+
+修改配置文件 `config-client-dev.yml` 中配置信息为：`dev update`, 再次在浏览器访问 http://localhost:12000/config-client-dev.yml 返回：`dev update`，说明 Server 端会自动读取最新提交的内容。
+
+> 仓库中的配置文件会被转换成 Web 接口，访问可以参照以下的规则：
+>
+> - /{application}/{profile}[/{label}]
+> - /{application}-{profile}.yml
+> - /{label}/{application}-{profile}.yml
+> - /{application}-{profile}.properties
+> - /{label}/{application}-{profile}.properties
+>
+> 上面的 URL 会映射 `{application}-{profile}.yml` 对应的配置文件，其中 `{label}` 对应 Git 上不同的分支，默认为 master。以 config-client-dev.yml 为例子，它的 application 是 config-client，profile 是 dev。
+
+### 1.4、Config Client端
+
+创建一个基础的 Spring Boot 应用，命名为 config-client
+
+#### 1.4.1、添加依赖
+
+在 pom.xml 中添加下述依赖：
+
+```xml
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-webflux</artifactId>
+</dependency>
+<dependency>
+    <groupId>org.springframework.cloud</groupId>
+    <artifactId>spring-cloud-starter-config</artifactId>
+</dependency>
+```
+
+> 引入 `spring-boot-starter-webflux` 是为了方便 Web 测试。Spring WebFlux 是随 Spring 5 推出的响应式 Web 框架，这里不展开说明，如果不了解的话直接用 MVC 就好了。
+>
+
+#### 1.4.2、配置文件
+
+需要配置两个配置文件，`application.yml` 和 `bootstrap.yml`，配置分别如下：
+**application.yml**
+
+```yml
+spring:
+  application:
+    name: config-client
+server:
+  port: 13000
+
+```
+
+**bootstart.yml**
+
+```yml
+spring:
+  cloud:
+    config:
+      uri: http://localhost:12000 # 配置中心的具体地址，即config-server
+      name: config-client         # 对应{application}部分
+      profile: dev                # 对应{profile}部分
+      label: master        # 对应{label}部分，即Git的分支，如果配置中心使用的是本地存储，则该参数无用
+```
+
+- `spring.cloud.config.name`：对应{application}部分
+- `spring.cloud.config.profile`：对应{profile}部分
+- `spring.cloud.config.uri`：配置中心的具体地址
+- `spring.cloud.config.label`：指明远程仓库的分支
+
+> **特别注意**：上面这些与 Spring Cloud Config 相关的属性必须配置在 bootstrap.yml 中，config 部分内容才能被正确加载。因为 config 的相关配置会先于 `application.yml`，而 `bootstrap.yml` 的加载也是先于`application.yml`。
+
+#### 1.4.3、启动类
+
+启动类不用修改，只用 `@SpringBootApplication` 就行了
+
+```java
+@SpringBootApplication
+public class ConfigClientApplication {
+
+    public static void main(String[] args) {
+        SpringApplication.run(ConfigClientApplication.class, args);
+    }
+
+}
+```
+
+在 Controller 中使用 `@Value` 注解来获取 Server 端参数的值
+
+```java
+@RestController
+public class HelloController {
+
+    ("${info.profile:error}")
+    private String profile;
+
+    ("/info")
+    public Mono<String> hello() {
+        return Mono.justOrEmpty(profile);
+    }
+}
+```
+
+#### 1.4.4、测试
+
+启动项目后访问 http://localhost:13000/info 返回 `dev` 说明已经正确的从 Server 端获取到了参数。到此一个完整的服务端提供配置服务，客户端获取配置参数的例子就完成了。
+
+我们再做一个小实验，手动修改 config-client-dev.yml 中配置信息为：`dev update` 提交到 Github, 再次在浏览器访问 http://localhost:13000/info 返回：`dev`，说明获取的信息还是旧的参数，这是为什么呢？
+
+因为 Spring Cloud Config 分服务端和客户端，服务端负责将 Git 中存储的配置文件发布成 REST 接口，客户端可以从服务端 REST 接口获取配置。但客户端并不能主动感知到配置的变化，从而主动去获取新的配置。客户端如何去主动获取新的配置信息呢，Spring Cloud 已经给我们提供了解决方案，每个客户端通过 POST 方法触发各自的 `/actuator/refresh`。
+
+#### 1.4.5、Refresh
+
+仅修改客户端即 config-client 项目，就可以实现 refresh 的功能。
+
+##### 1.4.5.1、添加依赖
+
+在原有的config-client项目的pom.xml的基础增加新的依赖
+
+```xml
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-actuator</artifactId>
+</dependency>
+```
+
+增加了 `spring-boot-starter-actuator` 包，`spring-boot-starter-actuator` 是一套监控的功能，可以监控程序在运行时状态，其中就包括 `/actuator/refresh` 的功能。
+
+##### 1.4.5.2、开启更新机制
+
+需要给加载变量的类上面加载 `@RefreshScope`，在客户端执行 `/actuator/refresh` 的时候就会更新此类下面的变量值。
+
+```java
+@RestController
+@RefreshScope
+public class HelloController {
+
+    @Value("${info.profile:error}")
+    private String hello;
+
+    @GetMapping("hello")
+    public Mono<String> hello() {
+        return Mono.justOrEmpty(hello);
+    }
+}
+```
+
+`@RefreshScope`：使用该注解的类，会在接到`SpringCloud`配置中心配置刷新的时候，自动将新的配置更新到该类对应的字段中。
+
+##### 1.4.5.2、配置
+
+Spring Boot 1.5.X 以上默认开通了安全认证，所以要在配置文件 application.yml 中添加以下配置以将 `/actuator/refresh` 这个 Endpoint 暴露出来
+
+```yml
+# springboot1.5.x开始，默认开通了安全认证
+management:
+  endpoints:
+    web:
+      exposure:
+        include: refresh
+```
+
+- **management.security.enabled：** springboot 1.5.X 以上默认开通了安全认证，所以需要添加这个配置
+- **management.endpoints.web.exposure.include：** springboot 2.x 默认只开启了info、health的访问，*代表开启所有访问
+
+##### 1.4.5.3、测试
+
+我们先访问客户端的测试连接：http://localhost:13000/hello， 这时，页面的显示是：hello dev update1，我们修改github上的信息，修改为：hello dev update，现在访问http://localhost:13000/hello，得到的信息还是：hello dev update1，现在我们刷新一下客户端，通过`cmd`命令行执行：`curl -X POST http://localhost:13000/actuator/refresh`，可以看到命令行上有显示：[“springcloud.hello”,”config.client.version”\]，意味着springcloud.hello这个配置已经刷新，这时，我们再去刷新一下页面，可以看到，页面上得到的信息已经变为了：hello](http://localhost:8081/actuator/refresh，可以看到命令行上有显示：["springcloud.hello","config.client.version"]，意味着springcloud.hello这个配置已经刷新，这时，我们再去刷新一下页面，可以看到，页面上得到的信息已经变为了：hello) dev update，这时我们refresh成功。
+
+![image-20200115143505544](.\img\image-20200115143505544.png)
+
+##### 1.4.5.4、Webhook
+
+`Webhook` 是当某个事件发生时，通过发送 `HTTP POST` 请求的方式来通知信息接收方。Webhook 来监测你在 Github.com 上的各种事件，最常见的莫过于 push 事件。如果你设置了一个监测 push 事件的 Webhook，那么每当你的这个项目有了任何提交，这个 Webhook 都会被触发，这时 Github 就会发送一个 HTTP POST 请求到你配置好的地址。
+
+如此一来，你就可以通过这种方式去自动完成一些重复性工作，比如，你可以用 Webhook 来自动触发一些持续集成（CI）工具的运作，比如 Travis CI；又或者是通过 Webhook 去部署你的线上服务器。下图就是 Github 上面的 Webhook 配置。
+
+<img src=".\img\006tNc79ly1fqhwt1r4fgj31kw0v9wl6.jpg" alt="img" style="zoom:150%;" />
+
+- `Payload URL` ：触发后回调的 URL
+- `Content type` ：数据格式，两种一般使用 json
+- `Secret` ：用作给 POST 的 body 加密的字符串。采用 HMAC 算法
+- `events` ：触发的事件列表。
+
+| events 事件类型 | 描述                         |
+| :-------------- | :--------------------------- |
+| push            | 仓库有 push 时触发。默认事件 |
+| create          | 当有分支或标签被创建时触发   |
+| delete          | 当有分支或标签被删除时触发   |
+
+这样我们就可以利用 hook 的机制去触发客户端的更新，但是当客户端越来越多的时候，hook 机制也不够优雅了，另外每次增加客户端都需要改动 hook 也是不现实的。其实，Spring Cloud 给了我们更好解决方案 ——Spring Cloud Bus。后续我们将继续学习如何通过 Spring Cloud Bus 来实现以消息总线的方式进行通知配置信息的变化，完成集群上的自动化更新。
+
+## 2、配置中心（服务化与高可用）
+
+当服务实例很多时，都从配置中心读取文件，这时可以考虑将配置中心做成一个微服务，将其集群化，从而达到高可用，架构图如下：
+
+![img](.\img\201908021007_1.png)
+
+### 2.1、高可用问题
+
+#### 2.1.1、传统作法
+
+通常在生产环境，Config Server 与服务注册中心一样，我们也需要将其扩展为高可用的集群。在之前实现的 config-server 基础上来实现高可用非常简单，不需要我们为这些服务端做任何额外的配置，只需要遵守一个配置规则：**将所有的 Config Server 都指向同一个 Git 仓库，这样所有的配置内容就通过统一的共享文件系统来维护，而客户端在指定 Config Server 位置时，只要配置 Config Server 外的均衡负载即可**，就像如下图所示的结构：
+
+![img](.\img\006tNc79ly1fqhz6kt3joj30ry0fa3z2.jpg)
+
+#### 2.1.2、注册为服务
+
+虽然通过服务端负载均衡已经能够实现，但是作为架构内的配置管理，本身其实也是可以看作架构中的一个微服务。所以**，另外一种方式更为简单的方法就是把 `config-server` 也注册为服务，这样所有客户端就能以服务的方式进行访问**。通过这种方法，只需要启动多个指向同一 Git 仓库位置的 config-server 就能实现高可用了。
+
+### 2.2、代码改造
+
+#### 2.2.1、服务端改造
+
+##### 2.2.1.1、添加依赖
+
+在 pom.xml 里边添加以下依赖
+
+```xml
+<dependency>
+    <groupId>org.springframework.cloud</groupId>
+    <artifactId>spring-cloud-starter-netflix-eureka-client</artifactId>
+</dependency>
+```
+
+##### 2.2.1.2、配置文件
+
+在 application.yml 里新增 Eureka 的配置
+
+```yml
+eureka:
+  client:
+    service-url:
+      defaultZone: http://localhost:7000/eureka/
+
+```
+
+这样 Server 端的改造就完成了。先启动 Eureka 注册中心，在启动 Server 端，在浏览器中访问：http://localhost:7000/ 就会看到 Server 端已经注册了到注册中心了。
+
+![img](.\img\006tNc79ly1fqhzv4ouhqj31kw0bkwgn.jpg)
+
+#### 2.2.2、客户端改造
+
+##### 2.2.2.1、添加依赖
+
+```xml
+<dependency>
+    <groupId>org.springframework.cloud</groupId>
+    <artifactId>spring-cloud-starter-netflix-eureka-client</artifactId>
+</dependency>
+```
+
+##### 2.2.2.1、配置文件
+
+**bootstrap.yml**
+
+```yml
+spring:
+  cloud:
+    config:
+#      uri: http://localhost:12000
+      # 配置中心的具体地址，即config-server。配置服务做集群时，注册到eureka服务注册中心时，取消指向config server的uri。
+      name: config-client         # 对应{application}部分
+      profile: dev                # 对应{profile}部分
+      label: master               # 对应{label}部分，即Git的分支，如果配置中心使用的是本地存储，则该参数无用
+      discovery:
+        enabled: true             # 开启 config client 服务发现支持。
+        service-id: config-server # 指定 Server 端的 name, 也就是 Server 端 spring.application.name 的值
+
+eureka:
+  client:
+    service-url:
+      defaultZone: http://localhost:7000/eureka/
+```
+
+主要是去掉了 `spring.cloud.config.uri` 直接指向 Server 端地址的配置，增加了最后的三个配置：
+
+- `spring.cloud.config.discovery.enabled`：开启 Config 服务发现支持
+- `spring.cloud.config.discovery.serviceId`：指定 Server 端的 name, 也就是 Server 端 `spring.application.name` 的值
+- `eureka.client.service-url.defaultZone`：指向配置中心的地址
+
+这三个配置文件都需要放到 `bootstrap.yml` 的配置中。
+
+启动 Client 端，在浏览器中访问：http://localhost:7000/ 就会看到 Server 端和 Client 端都已经注册了到注册中心了。
+
+![img](.\img\006tNc79ly1fqhzvwx9rdj31kw0dctbj.jpg)
+
+#### 2.2.3、高可用
+
+为了模拟生产集群环境，我们启动两个 Server 端，端口分别为 12000 和 12001，提供高可用的 Server 端支持。
+
+![img](.\img\006tNc79ly1fqi05xzbhnj31kw0dvjuj.jpg)
+
+如上图就可发现会有两个 Server 端同时提供配置中心的服务，防止某一台 down 掉之后影响整个系统的使用。
+
+我们先单独测试服务端，分别访问：http://localhost:12000/config-client/dev 和 http://localhost:12001/config-client/dev 返回信息：
+
+```
+{
+  "name": "config-client",
+  "profiles": ["dev"],
+  "label": null,
+  "version": "90dd76966da0eed967a0cbce3320f0f7ff63eb6b",
+  "state": null,
+  "propertySources": [
+    {
+      "name": "https://github.com/zhaoyibo/spring-cloud-study/config-repo/config-client-dev.yml",
+      "source": {
+        "info.profile": "dev update"
+      }
+    }
+  ]
+}
+```
+
+说明两个 Server 端都正常读取到了配置信息。
+
+再次访问 http://localhost:13000/info 返回 `dev update`。说明客户端已经读取到了 Server 端的内容，我们随机停掉一台 Server 端的服务，再次访问 http://localhost:13000/info 依然返回 `dev update`，说明达到了高可用的目的。
+
+## 3、配置中心（消息总线）
+
+### 3.1、简介
+
+`Spring Cloud bus`**通过轻量消息代理连接各个分布的节点**。这会**用在广播状态的变化（例如配置变化）或者其他的消息指令。Spring bus的一个核心思想是通过分布式的启动器对spring boot应用进行扩展，也可以用来建立一个多个之间的通信频道**。目前唯一实现的方式是用`AMQP`消息代理作为通道，同样特性的设置（有些取决于通道的设置）在更多通道的文档中。
+
+**可以将它理解为管理和传播所有分布式项目中的消息即可，其本质是利用了MQ的广播机制在分布式的系统中传递消息**。目前常用的有`Kafka`和`RabbitMQ`。利用Bus的机制可以做很多事情，其中配置中心客户端刷新就是典型的应用场景只一，用一张图来描述bus在配置中心使用的机制。
+
+![img](.\img\configbus1.jpg)
+
+根据此图我们可以看出利用`Spring Cloud Bus`做配置更新的步骤:
+
+1. 提交代码触发post给客户端A发送bus/refresh
+2. 客户端A接收到请求从Server端更新配置并且发送给Spring Cloud Bus
+3. Spring Cloud Bus接收到消息并通知给其它客户端。
+4. 其它客户端收到通知，请求Server获取最新配置
+5. 全部客户端均获取到最新的配置
+
+### 3.2、项目示例
+
+使用之前的config-client和cifnig-server做示例，mq使用`rabbitMQ`。
+
+[RabbitMQ安装教程](https://blog.csdn.net/qq_38931949/article/details/95513014)
+
+#### 3.2.1、客户端config-client
+
+##### 3.2.1.1、添加依赖
+
+```xml
+<dependency>
+    <groupId>org.springframework.cloud</groupId>
+    <artifactId>spring-cloud-starter-bus-amqp</artifactId>
+</dependency>
+```
+
+需要多引入`spring-cloud-starter-bus-amqp`包，增加对消息总线的支持
+
+##### 3.2.1.2、添加依赖
+
+```yml
+server:
+  port: 13000
+spring:
+  application:
+    name: config-client
+  rabbitmq:       # rabbitmq的相关配置。
+    host: 127.0.0.1
+    port: 5672
+    username: jjcc
+    password: jjcc
+  cloud:
+    bus:
+      trace:
+        enabled: true # 开启消息跟踪
+
+# springboot1.5x 以上默认开通了安全认证，所以需要添加这个配置。用于config client端刷新配置文件的url
+management:
+  endpoints:
+    web:
+      exposure:
+        include: bus-refresh
+
+```
+
+配置文件需要增加`RebbitMq`的相关配置（`spring.rabbitmq`），这样客户端代码就改造完成了。
+
+##### 3.2.1.3、测试
+
+依次启动eureka-server、confg-cserver,启动两个config-client，端口为：13000、13001。
+
+启动完成后，浏览器分别访问连接：http://localhost:13000/hello， http://localhost:13001/hello， 可以发现页面显示的内容都是：hello update，说明客户端都已经读取到了server端的内容。
+
+现在我们更新github上的配置文件，将配置内容改为hello update，先访问一下http://localhost:13000/hello，可以看到页面依然显示为：hello update。
+
+我们对端口为13000的服务发送一个/actuator/bus-refresh的POST请求，在win10下使用下面命令来模拟webhook。
+
+```shell
+curl -X POST http://localhost:13000/actuator/bus-refresh
+```
+
+**注意：** 在springboot2.x的版本中刷新路径为：`/actuator/bus-refresh`，在springboot1.5.x的版本中刷新路径为：`/bus/refresh`。
+
+执行完成后，我们先访问http://localhost:13001/hello，可以看到页面打印内容已经变为：hello update version：1.0，这样说明，我们13000端口的服务已经把更新后的信息通过rabbitmq推送给了13001端口的服务，这样我们就实现了图一中的示例。
+
+> 另外，`/actuator/bus-refresh`接口可以指定服务，即使用"destination"参数，比如 “`/actuator/bus-refresh?destination=customers:**`” 即刷新服务名为`customers`的所有服务。
+
+### 3.3、改进版
+
+上面的流程中，虽然我们做到了利用一个消息总线触发刷新，而刷新所有客户端配置的目的，但是这种方式并不合适，如下：
+
+- 打破了微服务的职责单一性。微服务本身是业务模块，它本不应该承担配置刷新的职责。
+- 破坏了微服务各节点的对等性。
+- 如果客户端IP有变，这时我们就要修改WebHook的配置。
+
+可以将上面的流程改进一下：
+
+![img](.\img\configbus2.jpg)
+
+这时`Spring Cloud Bus`做配置更新步骤如下:
+
+1.  提交代码触发post给server端发送`bus/refresh`。
+2. Spring Cloud Bus接到消息并通知给其它客户端。
+3. 其它客户端接收到通知，请求Server端获取最新配置。
+4. 全部客户端均获到最新的配置。
+
+**这样的话我们在`server端`的代码做一些改动，来支持/actuator/bus-refresh**
+
+#### 3.3.1 添加依赖
+
+```xml
+<dependency>
+    <groupId>org.springframework.cloud</groupId>
+    <artifactId>spring-cloud-starter-bus-amqp</artifactId>
+</dependency>
+```
+
+需要多引入`spring-cloud-starter-bus-amqp`包，增加对消息总线的支持
+
+#### 3.3.2、添加依赖
+
+```yml
+server:
+  port: 12000
+
+spring:
+  application:
+    name: config-server
+  cloud:
+    config:
+      server:
+        git:
+          uri: https://github.com/jjcc123312/springcloud-study.git # Git地址
+          search-paths: springcloud-config    # Git目录
+#          username:    # git账号
+#          passphrase:  # git密码
+      label: master     # git的分支
+  rabbitmq:
+    host: 127.0.0.1
+    port: 5672
+    username: guest
+    password: guest
+
+eureka:
+  client:
+    service-url:
+      defaultZone: http://localhost:7000/eureka/
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: bus-refresh
+
+```
+
+配置文件需要增加`RebbitMq`的相关配置，`actuator`刷新的访问。
+
+#### 3.3.3、测试
+
+依次启动`eureka`，`config-serve`，`config-client`。
+
+修改config-client启动配置，同时在13000和13001端口启动服务。
+
+按照上面的测试方式，访问两个客户端测试均可以正确返回信息。同样修改配置文件，将值改为：dev update；version：2.0；并提交到仓库中。在win10下使用下面命令来模拟`webhook`。
+
+```shell
+curl -X POST http://localhost:12000/actuator/bus-refresh
+```
+
+> **注意：**这里访问的是`config server`的地址
+
+执行完成后，依次访问两个客户端，返回：dev update；version：2.0；说明三个客户端均已经拿到了最新配置文件的信息，这样我们就实现了上图中的示例。
+
+# 三、服务网关
+
+## 1、服务网关 Zuul（路由）
+
+### 1.1、前言
+
+通过之前Spring Cloud中几个核心组件的学习，已经可以构建一个简略的微服务架构了，可能像下图这样：
+
+![img](.\img\006tNc79ly1fqmei2skktj30ma0k2myr.jpg)
+
+我们**使用`Spring Cloud NetFlix`中的`Eureka`实现了服务注册中心以及服务注册与发现；而服务间通过`Ribbon`或`Feign`实现服务的调用以及负载均衡。通过`Spring Cloud Config`实现应用环境的外部化配置以及版本管理。为了使得服务集群更为健壮，使用`Hystrix`的熔断机制来避免在微服务架构中个别服务出现异常引起的故障蔓延**。似乎一个微服务框架已经完成了。
+
+我们还是少考虑了一个问题，外部的应用如何来访问各种微服务呢？**在微服务架构中，后端服务往往不直接开放给调用端，而是通过一个API网关根据请求的URL，路由到相应的服务。当添加API网关后，在第三方调用端和服务提供方之间创建了一面墙，这面墙直接与调用方通信进行权限控制，后将请求均衡分发给后台服务端**。
+
+> 在`Spring Cloud`微服务系统中，一种常见的负载均衡方式是，客户端的请求首先经过负载均衡（Zuul、Nginx、F5），在到达服务网关（zuul集群），然后再到具体的服务，**服务统一注册到高可用的服务注册中心集群**，服务所有的配置文件由配置服务（Spring Cloud Config）管理，配置服务的配置文件放在Git仓库，方便开发人员随时改配置。
+
+### 1.2、为什么需要API Gateway？
+
+**1、简化客户端调用复杂度**
+
+在微服务架构模式下后端服务的实例一般是动态的，对于客户端而言很难发现动态改变的服务实例的访问地址信息。因此在基于微服务的项目为了简化前端的调用逻辑，通常会引入API Gateway作为轻量级网关，同时**API Gateway也会实现相关的`认证逻辑`从而简化内部服务之间相互调用的复杂度**。
+
+![img](.\img\006tNc79ly1fqmintl4smj30pi0e6mxw.jpg)
+
+**2、数据裁剪以及聚合**
+
+通常而言不同的客户端对于显示时对于数据的需求是不一致的，比如手机端或者Web端又或者在低延迟的网络环境或者高延迟的网络环境。
+
+因此为了优化客户端的使用体验，`API Gateway`可以对**通用性的响应数据进行裁剪**以使用不同客户端的使用需求。同时还**可以将多个API调用逻辑进行聚合，从而减少客户端的请求数**，优化客户端用户体验。
+
+**3、多渠道支持**
+
+当然我们还可以针对不同的渠道和客户端提供不同的 API Gateway, 对于该模式的使用由另外一个大家熟知的方式叫 Backend for front-end, 在 Backend for front-end 模式当中，我们可以针对不同的客户端分别创建其 BFF，进一步了解 BFF 可以参考这篇文章：[Pattern: Backends For Frontends](http://samnewman.io/patterns/architectural/bff/)
+
+[![img](.\img\006tNc79ly1fqmdulzjxuj30ke0dc0tp.jpg)](https://src.windmt.com/img/006tNc79ly1fqmdulzjxuj30ke0dc0tp.jpg)
+
+**4、遗留系统的微服务改造**
+
+对于系统而言进行微服务改造通常是由于原有的系统存在或多或少的问题，比如技术债务，代码质量，可维护性，可扩展性等等。API GateWay的模式同样适用于这一类遗留系统的改造，通过微服务的改造逐步实现对原有系统中的问题的修复，从而提升对于原有业务响应力的提升。通过引入抽象层，逐步使用新的实现代替旧的实现。
+
+![img](.\img\006tNc79ly1fqmduv84imj30v20hejta.jpg)
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
