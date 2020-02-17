@@ -12,6 +12,10 @@
 
 [SpringCloud 之 Eureka 服务注册中心 [ 注册数据、视图微服务 ]（一）](https://blog.csdn.net/Hack_Different/article/details/103049169)
 
+[Spring Cloud Gateway-API文档](https://www.jianshu.com/p/a114a606a1f4)
+
+[Spring Cloud Gateway 2.1.0 中文官网文档](https://blog.csdn.net/guying4875/article/details/88390111)
+
 [TOC]
 
 # 一、Spring Cloud介绍
@@ -2130,8 +2134,8 @@ spring:
   rabbitmq:       # rabbitmq的相关配置。
     host: 127.0.0.1
     port: 5672
-    username: jjcc
-    password: jjcc
+    username: guest
+    password: guest
   cloud:
     bus:
       trace:
@@ -2271,11 +2275,26 @@ curl -X POST http://localhost:12000/actuator/bus-refresh
 
 > 在`Spring Cloud`微服务系统中，一种常见的负载均衡方式是，客户端的请求首先经过负载均衡（Zuul、Nginx、F5），在到达服务网关（zuul集群），然后再到具体的服务，**服务统一注册到高可用的服务注册中心集群**，服务所有的配置文件由配置服务（Spring Cloud Config）管理，配置服务的配置文件放在Git仓库，方便开发人员随时改配置。
 
+这样的架构会有两个比较麻烦的问题：
+
+1. **路由规则与服务实例的维护问题**：外层的负载均衡(`nginx`)需要维护所有的服务实例清单(图上的`OpenService`)。
+
+   每个服务都有自己的IP地址，`Nginx`想要正确请求转发到服务上，就必须**维护着每个服务实例的地址**！更是灾难的是：这些服务实例的IP地址还有可能会变，服务之间的划分也很可能会变。
+
+2. **签名效验，登陆验证冗余问题**：为了保证对外服务的安全性，我们在服务端实现的微服务接口，往往都会有一定的**权限效验机制**，但我们的服务是独立的，我们**不得不在这些应用中都实现这样一套效验逻辑**，这样就会造成效验逻辑的冗余。
+
+   购物车和订单模块都需要用户登录了才可以正常访问，基于现在的架构，只能在**购物车和订单模块都编写校验逻辑**，这无疑是冗余的代码。
+
+`Spring Cloud Zuul`是这样解决上述两个问题的：
+
+- Spring Cloud Zuul通过与Spring Cloud Eureka进行整合，将自身注册为Eureka服务治理下的应用，同时从Eureka中获得所有其它微服务的实例信息。**外层调用都必须通过API网关**，使得**将维护服务实例的工作交给了服务治理框架自动完成**。
+- 在API网关服务上进行统一调用来**对微服务接口做前置过滤**，以实现对微服务接口的**拦截和效验**。
+
 ### 1.2、为什么需要API Gateway？
 
 **1、简化客户端调用复杂度**
 
-在微服务架构模式下后端服务的实例一般是动态的，对于客户端而言很难发现动态改变的服务实例的访问地址信息。因此在基于微服务的项目为了简化前端的调用逻辑，通常会引入API Gateway作为轻量级网关，同时**API Gateway也会实现相关的`认证逻辑`从而简化内部服务之间相互调用的复杂度**。
+在微服务架构模式下后端服务的实例一般是动态的，对于客户端而言很难发现动态改变的服务实例的访问地址信息。因此在基于微服务的项目为了简化前端的调用逻辑，通常会引入`API Gateway`作为轻量级网关，同时**API Gateway也会实现相关的`认证逻辑`从而简化内部服务之间相互调用的复杂度**。
 
 ![img](.\img\006tNc79ly1fqmintl4smj30pi0e6mxw.jpg)
 
@@ -2283,11 +2302,11 @@ curl -X POST http://localhost:12000/actuator/bus-refresh
 
 通常而言不同的客户端对于显示时对于数据的需求是不一致的，比如手机端或者Web端又或者在低延迟的网络环境或者高延迟的网络环境。
 
-因此为了优化客户端的使用体验，`API Gateway`可以对**通用性的响应数据进行裁剪**以使用不同客户端的使用需求。同时还**可以将多个API调用逻辑进行聚合，从而减少客户端的请求数**，优化客户端用户体验。
+因此为了优化客户端的使用体验，`API Gateway`可以对**通用性的响应数据进行裁剪**以达到不同客户端的使用需求。同时还**可以将多个API调用逻辑进行聚合，从而减少客户端的请求数**，优化客户端用户体验。
 
 **3、多渠道支持**
 
-当然我们还可以针对不同的渠道和客户端提供不同的 API Gateway, 对于该模式的使用由另外一个大家熟知的方式叫 Backend for front-end, 在 Backend for front-end 模式当中，我们可以针对不同的客户端分别创建其 BFF，进一步了解 BFF 可以参考这篇文章：[Pattern: Backends For Frontends](http://samnewman.io/patterns/architectural/bff/)
+当然我们还可以针对不同的渠道和客户端提供不同的 `API Gateway`, 对于该模式的使用由另外一个大家熟知的方式叫 `Backend for front-end`, 在 Backend for front-end 模式当中，我们可以针对不同的客户端分别创建其 BFF，进一步了解 BFF 可以参考这篇文章：[Pattern: Backends For Frontends](http://samnewman.io/patterns/architectural/bff/)
 
 [![img](.\img\006tNc79ly1fqmdulzjxuj30ke0dc0tp.jpg)](https://src.windmt.com/img/006tNc79ly1fqmdulzjxuj30ke0dc0tp.jpg)
 
@@ -2297,6 +2316,2258 @@ curl -X POST http://localhost:12000/actuator/bus-refresh
 
 ![img](.\img\006tNc79ly1fqmduv84imj30v20hejta.jpg)
 
+> 在Spring Cloud体系中，`Spring Cloud Zuul`就是提供负载均衡、反向代理、权限认证的一个API GateWay。
+>
+
+### 1.3、Spring Cloud Zuul
+
+#### 1.3.1、准备工作
+
+在构建服务网关之前，我们先准备一下网关内部的微服务，可以直接使用前几篇编写的内容，比如：
+
+- eureka
+- producer
+- consumer
+
+在启动了 eureka、producer 和 consumer 的实例之后，所有的准备工作就以就绪，下面我们来试试使用 Spring Cloud Zuul 来实现服务网关的功能。
+
+首先创建一个基础的 Spring Boot 项目，命名为：api-gateway。
+
+#### 1.3.2、pom.xml
+
+在 `pom.xml` 中引入以下依赖
+
+```xml
+<dependency>
+    <groupId>org.springframework.cloud</groupId>
+    <artifactId>spring-cloud-starter-netflix-zuul</artifactId>
+</dependency>
+<dependency>
+    <groupId>org.springframework.cloud</groupId>
+    <artifactId>spring-cloud-starter-netflix-eureka-client</artifactId>
+</dependency>
+```
+
+#### 1.3.3、配置文件application.yml
+
+在配置文件 application.yml 中加入服务名、端口号、Eureka 注册中心的地址：
+
+```yml
+spring:
+  application:
+    name: api-gateway
+server:
+  port: 14000
+eureka:
+  client:
+    service-url:
+      defaultZone: http://localhost:7000/eureka/
+
+```
+
+#### 1.3.4、启动类
+
+使用 `@EnableZuulProxy` 注解开启 Zuul 的功能
+
+```java
+@EnableZuulProxy
+@SpringBootApplication
+public class ApiGatewayZuulApplication {
+
+    public static void main(String[] args) {
+        SpringApplication.run(ApiGatewayZuulApplication.class, args);
+    }
+
+}
+```
+
+到这里，一个基于 `Spring Cloud Zuul` 服务网关就已经构建完毕。启动该应用，一个默认的服务网关就构建完毕了，同时能在 Eureka 里看到这个服务。
+
+![img](.\img\006tNc79ly1fqmf8vyiasj31kw0v90zp.jpg)
+
+#### 1.3.5、测试
+
+由于 Spring Cloud Zuul 在整合了 Eureka 之后，具备默认的服务路由功能，即：当我们这里构建的 `api-gateway` 应用启动并注册到 Eureka 之后，服务网关会发现上面我们启动的两个服务 `producer` 和 `consumer`，这时候 Zuul 就会创建两个路由规则。每个路由规则都包含两部分，一部分是外部请求的匹配规则，另一部分是路由的服务 ID。针对当前示例的情况，Zuul 会创建下面的两个路由规则：
+
+- 转发到 `producer` 服务的请求规则为：`/producer/**`
+- 转发到 `consumer` 服务的请求规则为：`/consumer/**`
+
+最后，我们可以通过访问 `14000` 端口的服务网关来验证上述路由的正确性：
+
+- 比如访问：http://localhost:14000/consumer/hello/windmt，该请求将最终被路由到 `consumer` 的 `/hello` 接口上。
+
+### 1.4、服务网关 Zuul（过滤器）
+
+为了在 API 网关中实现对客户端请求的校验，我们将需要使用到 Spring Cloud Zuul 的另外一个核心功能：**过滤器**。
+
+Zuul 允许开发者在 API 网关上通过定义过滤器来实现对请求的拦截与过滤，实现的方法非常简单。
+
+#### 1.4.1、Zuul的核心
+
+Zuul的核心是Filter，用来实现对外服务的控制。分别是是"“`PRE`”、“`ROUTING`”、“`POST`”、“`ERROR`”，整个生命周期可以用下图来表示
+
+![img](./img/006tNc79ly1fqmg1wtyhdj30pl0fqdgt.jpg)
+
+Zuul大部分功能都是通过过滤器来实现的，Zuul中定义了四种标准过滤器类型，这些过滤器类型对应于请求的典型生命周期。
+
+- **PRE**：这种过滤器在请求被路由之前调用。我们可以利用这种过滤器实现身份验证、在集群中选择请求的微服务，记录调试信息等。
+- **ROUTING**：这种过滤器将请求路由到微服务。这种过滤器用于构建发送给微服务的请求，并使用 Apache HttpClient 或 Netfilx Ribbon 请求微服务。
+- **POST**：这种过滤器在请求路由到微服务以后执行。这种过滤可以用来为响应添加标准的`Http Header`、收集统计信息和指标、将响应从微服务发送给客户端等。
+- **ERROR**：在其它阶段发生错误时执行该过滤器。除了默认的过滤器类型，Zuul还允许我们创建自定义的过滤器类型。例如，我们可以定制一种 STATIC 类型的过滤器，直接在 Zuul 中生成响应，而不将请求转发到后端的微服务。
+
+#### 1.4.2、Zuul中默认实现的Filter
+
+| 类型  | 顺序 | 过滤器                  | 功能                         |
+| :---- | :--- | :---------------------- | :--------------------------- |
+| pre   | -3   | ServletDetectionFilter  | 标记处理 Servlet 的类型      |
+| pre   | -2   | Servlet30WrapperFilter  | 包装 HttpServletRequest 请求 |
+| pre   | -1   | FormBodyWrapperFilter   | 包装请求体                   |
+| route | 1    | DebugFilter             | 标记调试标志                 |
+| route | 5    | PreDecorationFilter     | 处理请求上下文供后续使用     |
+| route | 10   | RibbonRoutingFilter     | serviceId 请求转发           |
+| route | 100  | SimpleHostRoutingFilter | url 请求转发                 |
+| route | 500  | SendForwardFilter       | forward 请求转发             |
+| post  | 0    | SendErrorFilter         | 处理有错误的请求响应         |
+| post  | 1000 | SendResponseFilter      | 处理正常的请求响应           |
+
+#### 1.4.3、禁用指定的 Filter
+
+可以在 application.yml 中配置需要禁用的 filter，格式为 `zuul...disable=true`。
+比如要禁用 `org.springframework.cloud.netflix.zuul.filters.post.SendResponseFilter` 就设置
+
+```yml
+zuul:
+  SendResponseFilter:
+    post:
+      disable: true
+```
+
+#### 1.4.4、自定义 Filter
+
+实现自定义Filter，需要继承`ZuulFilter`的类，并覆盖其中的4个方法。
+
+> 我们假设有这样一个场景，因为服务网关应对的是外部的所有请求，为了避免产生安全隐患，我们需要对请求做一定的限制，比如请求中含有Token便让请求继续往下走，如果请求不带Token就直接返回并给出提示。
+
+首先自定义一个 Filter，继承 ZuulFilter 抽象类，在 `run ()` 方法中验证参数是否含有 Token，具体如下：
+
+```java
+public class MyFilter extends ZuulFilter {
+
+    /**
+     * 过滤器的类型，它决定过滤器在请求的生命周期哪个环节执行。
+     * 这里定义了 pre，代表在请求被路由之前执行。
+     * @title filterType
+     * @author Jjcc
+     * @return java.lang.String
+     * @createTime 2020/2/1 0001 21:18
+     */
+    @Override
+    public String filterType() {
+        return "pre";
+    }
+
+    /**
+     * filter执行顺序，通过数字指定。
+     * 数字越大代表执行顺序越低
+     * @title filterOrder
+     * @author Jjcc
+     * @return int
+     * @createTime 2020/2/1 0001 21:21
+     */
+    @Override
+    public int filterOrder() {
+        return 0;
+    }
+
+    /**
+     * 判断该过滤器是否需要被执行。这里我们直接返回了true，因此该过滤器对所有请求都会生效。
+     * 实际运用中我们可以利用该函数来指定过滤器的有效范围。
+     * 可通过RequestContext.getCurrentContext()方法获取请求体。
+     * @title shouldFilter
+     * @author Jjcc
+     * @return boolean
+     * @createTime 2020/2/1 0001 21:22
+     */
+    @Override
+    public boolean shouldFilter() {
+        HttpServletRequest request = RequestContext.getCurrentContext().getRequest();
+        return true;
+    }
+
+
+    /**
+     * 过滤器的具体逻辑
+     * @title run
+     * @author Jjcc
+     * @return java.lang.Object
+     * @createTime 2020/2/1 0001 21:27
+     */
+    @Override
+    public Object run() throws ZuulException {
+         RequestContext ctx = RequestContext.getCurrentContext();
+        HttpServletRequest request = ctx.getRequest();
+
+        logger.info("--->> TokenFilterP{}，{}", request.getMethod(), request.getRequestURL().toString());
+
+        // 获取请求的参数
+        String token = request.getParameter("token");
+
+        Optional<String> optional = Optional.ofNullable(token);
+
+        if (optional.isPresent()) {
+            // 如果为空，不对其进行路由
+            ctx.setSendZuulResponse(false);
+            ctx.setResponseStatusCode(400);
+            ctx.setResponseBody("token is empty");
+            ctx.set("ifSuccess", "false");
+        } else {
+            // 不为空，对请求进行路由
+            ctx.setSendZuulResponse(true);
+            ctx.setResponseStatusCode(200);
+            ctx.set("isSuccess", true);
+        }
+        return null;
+    }
+}
+```
+
+在上面实现的过滤器代码中，我们通过继承 `ZuulFilter` 抽象类并重写了下面的四个方法来实现自定义的过滤器。这四个方法分别定义了：
+
+- `filterType()`：过滤器的类型，它决定过滤器在请求的生命周期中哪个环节执行。`pre`：在请求被路由前执行、`routing`：用于构建发送给微服务的请求、`post`：在路由到微服务后执行，用于构建响应体、`error`：出现异常时执行。
+- `filterOrder()`：过滤器的执行顺序。当请求在一个阶段中存在多个过滤器时，需要根据该方法返回的值来依次执行。通过数字指定，数字越大，优先级越低。
+- `shouldFilter()`：判断该路由器是否需要执行。这里我们直接返回了 `true`，因此该过滤器对所有请求都会生效。实际运用中我们可以利用该函数来指定过滤器的有效范围。
+- `run()`：过滤器的具体逻辑。这里我们通过 `ctx.setSendZuulResponse(false)` 令 Zuul 过滤该请求，不对其进行路由，然后通过 `ctx.setResponseStatusCode(401)` 设置了其返回的错误码，当然我们也可以进一步优化我们的返回，比如，通过 `ctx.setResponseBody(body)` 对返回 body 内容进行编辑等。
+
+在实现了自定义过滤器之后，它并不会直接生效，我们还需要为其创建具体的 Bean 才能启动该过滤器，比如，在应用主类中增加如下内容：
+
+```java
+/**
+ * @EnableZuulProxy 开启对zuul的支持
+ * @author Administrator
+ */
+@EnableZuulProxy
+@SpringBootApplication
+public class ApiGatewayZuulApplication {
+
+    public static void main(String[] args) {
+        SpringApplication.run(ApiGatewayZuulApplication.class, args);
+    }
+
+    @Bean
+    public MyFilter tokenFilter() {
+        return new MyFilter();
+    }
+
+}
+```
+
+#### 1.4.5、测试
+
+打开浏览器，我们访问：http://localhost:14000/eureka-consumer/hello/asdasd， 返回：token is empty ，请求被拦截返回。
+
+访问地址：http://localhost:14000/eureka-consumer/hello/asdasd?token=123，返回：Hello，asdasd。当前时间：2020-02-01T22:34:47.124端口号：error，说明请求正常响应。
+
+通过上面这例子我们可以看出，我们可以使用“PRE”类型的Filter做很多的验证工作，在实际使用中我们可以结合shiro、oauth2.0等技术去做鉴权、验证。
+
+### 1.5、路由熔断
+
+当我们的后端服务出现异常的时候，我们不希望将异常抛出给最外层，期望服务可以自动进行降级处理。Zuul给我们提供了这样的支持。当某个服务出现异常时，直接返回我们预设的信息。
+
+我们通过自定义的`fallback`方法，并且将其指定给某个`route`来实现该`route`访问出问题的熔断处理。主要继承`FallbackProvider`接口来实现，`FallbackProvider`默认有两个方法，一个用来指明熔断拦截哪个服务，一个定制返回内容。
+
+```java
+/*
+ * Copyright 2013-2019 the original author or authors.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.springframework.cloud.netflix.zuul.filters.route;
+
+import org.springframework.http.client.ClientHttpResponse;
+
+/**
+ * Provides fallback when a failure occurs on a route.
+ *
+ * @author Ryan Baxter
+ * @author Dominik Mostek
+ */
+public interface FallbackProvider {
+
+    /**
+     * The route this fallback will be used for.
+     * @return The route the fallback will be used for.
+     */
+    String getRoute();
+
+    /**
+     * Provides a fallback response based on the cause of the failed execution.
+     * @param route The route the fallback is for
+     * @param cause cause of the main method failure, may be <code>null</code>
+     * @return the fallback response
+     */
+    ClientHttpResponse fallbackResponse(String route, Throwable cause);
+
+}
+```
+
+实现类通过实现`getRoute`方法，告诉Zuul它是负责哪个`route`定义的熔断。而`fallbackResponse`方法则是告诉 Zuul 断路出现时，它会提供一个什么返回值来处理请求。
+
+我们以上面的spring-cloud-producer服务为例，定制它的熔断返回内容。
+
+```java
+package com.springcloud.zuulsimple.component;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.cloud.netflix.zuul.filters.route.FallbackProvider;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.client.ClientHttpResponse;
+
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+
+/**
+ * Created with IntelliJ IDEA.
+ *
+ * @User: weishiyao
+ * @Date: 2019/7/6
+ * @Time: 16:25
+ * @email: inwsy@hotmail.com
+ * Description:
+ */
+ @Component
+public class ProducerFallback implements FallbackProvider {
+
+    private final Logger logger = LoggerFactory.getLogger(FallbackProvider.class);
+
+    //指定要处理的 service。
+    @Override
+    public String getRoute() {
+        return "spring-cloud-producer";
+    }
+
+    public ClientHttpResponse fallbackResponse() {
+        return new ClientHttpResponse() {
+            @Override
+            public HttpStatus getStatusCode() throws IOException {
+                return HttpStatus.OK;
+            }
+
+            @Override
+            public int getRawStatusCode() throws IOException {
+                return 200;
+            }
+
+            @Override
+            public String getStatusText() throws IOException {
+                return "OK";
+            }
+
+            @Override
+            public void close() {
+
+            }
+
+            @Override
+            public InputStream getBody() throws IOException {
+                return new ByteArrayInputStream("The service is unavailable.".getBytes());
+            }
+
+            @Override
+            public HttpHeaders getHeaders() {
+                HttpHeaders headers = new HttpHeaders();
+                headers.setContentType(MediaType.APPLICATION_JSON);
+                return headers;
+            }
+        };
+    }
+
+    @Override
+    public ClientHttpResponse fallbackResponse(String route, Throwable cause) {
+        if (cause != null && cause.getCause() != null) {
+            String reason = cause.getCause().getMessage();
+            logger.info("Excption {}",reason);
+        }
+        return fallbackResponse();
+    }
+}
+```
+
+当服务出现异常时，打印相关异常信息，并返回”The service is unavailable.”。
+
+需要注意点，将Eureka的自我保护模式打开，如果这里不开启自我保护模式，producer一停止服务，这个服务直接在Eureka下线，Zuul会直接报错找不到对应的producer服务。
+
+我们顺次启动这三个服务。
+
+现在打开浏览器，访问链接：http://localhost:8080/spring-cloud-producer/hello?name=spring&token=123， 可以看到页面正常返回：hello spring，producer is ready，现在我们把producer这个服务停下，再刷新下页面，可以看到页面返回：The service is unavailable.。这样我们熔断也测试成功。
+
+### 1.6、Zuul高可用
+
+![img](./img/zuul-case-1580568526007.png)
+
+我们实际使用Zuul的方式如上图，不同的客户端使用不同的负载将请求分发到后端的Zuul，Zuul在通过Eureka调用后端服务，最后对外输出。因此为了保证Zuul的高可用性，前端可以同时启动多个Zuul实例进行负载，在Zuul的前端使用Nginx或者F5进行负载转发以达到高可用性。
+
+## 2、Spring Cloud GateWay
+
+网关作为一个系统的流量的入口，有着举足轻重的作用，通常的作用如下：
+
+- 协议转换，路由转发
+- 流量聚合，对流量进行监控，日志输出
+- 作为整个系统的前端工程，对流量进行控制，有限流的作用
+- 作为系统的前端边界，外部流量只能通过网关才能访问系统
+- 可以在网关层做权限的判断
+- 可以在网关层做缓存
+
+### 2.1、Spring Cloud GateWay初探
+
+#### 2.1.1、概述
+
+Spring Cloud Gateway 作为 Spring Cloud 生态系统中的网关，目标是替代 Netflix Zuul，其不仅提供统一的路由方式，并且基于filter链的方式提供了网关基本的功能，例如：安全、监控、埋点和限流。
+
+Spring Cloud Gateway 的特征：
+
+- 基于 Spring Framework 5，Project Reactor 和 Spring Boot 2.0
+- 动态路由
+- Predicates 和 Filters 作用于特定路由
+- 集成 Hystrix 断路器
+- 集成 Spring Cloud DiscoveryClient
+- 易于编写的 Predicates 和 Filters
+- 限流
+- 路径重写
+
+#### 2.1.2、性能比较
+
+网上很多地方都说Zuul是阻塞的，Gateway是非阻塞的，这么说是不严谨的，准确的讲Zuul1.x是阻塞的，而在2.x的版本中，Zuul也是基于Netty，也是非阻塞的，如果一定要说性能，其实这个真没多大差距。
+
+而官方出过一个测试项目，创建了一个benchmark的测试项目：[spring-cloud-gateway-bench](https://github.com/spencergibb/spring-cloud-gateway-bench)，其中对比了：
+
+- Spring Cloud Gateway
+- Zuul1.x
+- Linkerd
+
+| 组件                 | 每秒请求数             |
+| -------------------- | ---------------------- |
+| Spring Cloud Gateway | Requests/sec: 32213.38 |
+| Zuul                 | Requests/sec: 20800.13 |
+| Linkerd              | Requests/sec: 28050.76 |
+
+> 从结果可知，Spring Cloud Gateway的RPS是Zuul1.x的1.6倍。
+
+#### 2.1.3、术语
+
+- **Route(路由)**：这是网关的基本构建块。它由一个ID，一个目标URI，一组断言和一组过滤器定义。如果断言为真，则路由匹对。
+- **Predicate(断言)**：这是一个 [Java 8 的 Predicate](http://docs.oracle.com/javase/8/docs/api/java/util/function/Predicate.html)。输入类型是一个 [`ServerWebExchange`](https://docs.spring.io/spring/docs/5.0.x/javadoc-api/org/springframework/web/server/ServerWebExchange.html)。我们可以使用它来匹配来自 HTTP 请求的任何内容，例如 headers 或参数。
+- **Filter（过滤器）**：这是 `org.springframework.cloud.gateway.filter.GatewayFilter` 的实例，我们可以使用它修改请求和响应。
+
+#### 2.1.4、流程
+
+![img](./img/006tKfTcly1fr2q2m5jq7j30cb0gjmxm.jpg)
+
+客户端向 Spring Cloud Gateway 发出请求。然后在 `Gateway Handler Mapping` 中找到与请求相匹配的路由（这个时候就用到`predicate`），将其发送到 `Gateway Web Handler`处理。`Handler` 再通过指定的过滤器链来将请求发送到我们实际的服务执行业务逻辑，然后返回。
+过滤器之间用虚线分开是因为过滤器可能会在发送代理请求之前（“pre”）或之后（“post”）执行业务逻辑。 先执行所有“pre”过滤器逻辑，然后进行代理请求。 在发出代理请求之后，收到代理服务的响应之后执行“post”过滤器逻辑。这跟zuul的处理过程很类似。在执行所有“pre”过滤器逻辑时，往往进行了鉴权、限流、日志输出等功能，以及请求头的更改、协议的转换；转发之后收到响应之后，会执行所有“post”过滤器的逻辑，在这里可以响应数据进行了修改，比如响应头、协议的转换等。
+
+> 在上面的处理过程中，有一个重要的点就是讲请求和路由进行匹配，这时候就需要用到`predicate`，它是决定了一个请求走哪一个路由。
+
+#### 2.1.5、示例
+
+Spring Cloud Gateway 网关路由有两种配置方式：
+
+- 在配置文件 yml 中配置
+- 通过@Bean自定义 RouteLocator，在启动主类 Application 中配置
+
+这两种方式是等价的，建议使用 yml 方式进配置。
+
+> 新建一个标准的 Spring Boot 工程，命名为 `gateway`
+
+##### 2.1.5.1、项目依赖
+
+```xml
+<dependency>
+    <groupId>org.springframework.cloud</groupId>
+    <artifactId>spring-cloud-starter-gateway</artifactId>
+</dependency>
+<dependency>
+    <groupId>org.springframework.cloud</groupId>
+    <artifactId>spring-cloud-starter-netflix-eureka-client</artifactId>
+</dependency>
+```
+
+##### 2.1.5.2、application.yml 配置文件
+
+```yml
+spring:
+  application:
+    name: api-gateway
+  cloud:
+    gateway:
+      discovery:
+        locator:
+          enabled: true
+      routes:
+        - id: gateway-service
+          uri: lb://EUREKA-CONSUMER
+          order: 0
+          predicates:
+            - Path=/customer/**
+          filters:
+            - StripPrefix=1
+            - AddResponseHeader=X-Response-Default-Foo, Default-Bar
+
+server:
+  port: 15000
+eureka:
+  client:
+    service-url:
+      defaultZone: http://localhost:7000/eureka/ #服务注册中心的地址
+logging:
+  level:
+    org.springframework.cloud.gateway: debug # 调整日志级别
+
+
+```
+
+> `gateway`注册到服务注册中心。`Spring Cloud Gateway` 提供了一种默认转发的能力，只要将 Spring Cloud Gateway 注册到服务中心，Spring Cloud Gateway 默认就会代理服务中心的所有服务。
+
+`gateway`配置说明：
+
+-  `spring.cloud.gateway.discovery.locator.enabled`：是否与服务注册与发现组建进行结合，通过serviceId转发到具体的服务实例。默认为 `false`，设为 true 便开启通过服务中心的自动根据 serviceId 创建路由的功能。
+- `spring.cloud.gateway.routes`：用于配制具体的路由规则，是一个数组。
+  - `id`：自定义的路由 ID，保持唯一。
+  - `uri`：目标服务地址
+  - `predicates`：路由条件，`Predicates`接受一个输入参数，返回一个布尔值结果，如果返回true，则路由匹对。该接口包含多种默认方法来将 Predicate 组合成其他复杂的逻辑（比如：与，或，非）。
+  - `filters`：过滤器配置。
+    - `stripPrefix`：对应的具体实现是 `StripPrefixGatewayFilterFactory`，可以接收一个非负整数，作用是去掉url的层数，整数即对应层数。
+    - `AddResponseHeader=X-Response-Default-Foo, Default-Bar`：响应头。
+- `logger.level.org.springframework.cloud.gateway`：调整相关包的 log 级别，以便排查问题
+
+> 上面这段`gateway`配置的意思是，配置了一个id为gateway-service的路由规则，当访问http://localhost:15000/customer/XXX时会自动转发到http://EUREKA-CONSUMER/XXX
+
+##### 2.1.5.3、测试
+
+Spring Boot 的启动类不用修改，直接启动即可。
+
+启动后我们便可在 Eureka 中看到我们的网关服务
+
+![gateway in eureka](./img/006tKfTcly1fr2ugwy6rxj30sg06775v.jpg)
+
+现在访问 http://localhost:15000/customer/hello/windmt 可以看到能正常返回数据并且响应头也加上了。
+
+![image-20180507170005882](./img/006tKfTcly1fr2vrxcz8sj30nd0hhn0a.jpg)
+
+##### 2.1.5.4、注意
+
+如果不配置`routes`，像之前使用 `Zuul` 那样访问http://localhost:15000/consumer/hello/windmt
+
+我们期待像直接访问 consumer 那样能返回 “Hello windmt!”，但是实际上却出错了，返回了 404 错误。我们来看一下 log
+
+```
+2018-05-07 16:20:34.643 DEBUG 69502 --- [ctor-http-nio-2] o.s.c.g.r.RouteDefinitionRouteLocator    : RouteDefinition CompositeDiscoveryClient_PRODUCER applying {pattern=/PRODUCER/**} to Path
+2018-05-07 16:20:34.652 DEBUG 69502 --- [ctor-http-nio-2] o.s.c.g.r.RouteDefinitionRouteLocator    : RouteDefinition CompositeDiscoveryClient_PRODUCER applying filter {regexp=/PRODUCER/(?<remaining>.*), replacement=/${remaining}} to RewritePath
+2018-05-07 16:20:34.657 DEBUG 69502 --- [ctor-http-nio-2] o.s.c.g.r.RouteDefinitionRouteLocator    : RouteDefinition matched: CompositeDiscoveryClient_PRODUCER
+2018-05-07 16:20:34.657 DEBUG 69502 --- [ctor-http-nio-2] o.s.c.g.r.RouteDefinitionRouteLocator    : RouteDefinition CompositeDiscoveryClient_CONSUMER applying {pattern=/CONSUMER/**} to Path
+2018-05-07 16:20:34.659 DEBUG 69502 --- [ctor-http-nio-2] o.s.c.g.r.RouteDefinitionRouteLocator    : RouteDefinition CompositeDiscoveryClient_CONSUMER applying filter {regexp=/CONSUMER/(?<remaining>.*), replacement=/${remaining}} to RewritePath
+2018-05-07 16:20:34.660 DEBUG 69502 --- [ctor-http-nio-2] o.s.c.g.r.RouteDefinitionRouteLocator    : RouteDefinition matched: CompositeDiscoveryClient_CONSUMER
+2018-05-07 16:20:34.662 DEBUG 69502 --- [ctor-http-nio-2] o.s.c.g.r.RouteDefinitionRouteLocator    : RouteDefinition CompositeDiscoveryClient_CLOUD-GATEWAY applying {pattern=/CLOUD-GATEWAY/**} to Path
+2018-05-07 16:20:34.664 DEBUG 69502 --- [ctor-http-nio-2] o.s.c.g.r.RouteDefinitionRouteLocator    : RouteDefinition CompositeDiscoveryClient_CLOUD-GATEWAY applying filter {regexp=/CLOUD-GATEWAY/(?<remaining>.*), replacement=/${remaining}} to RewritePath
+2018-05-07 16:20:34.665 DEBUG 69502 --- [ctor-http-nio-2] o.s.c.g.r.RouteDefinitionRouteLocator    : RouteDefinition matched: CompositeDiscoveryClient_CLOUD-GATEWAY
+2018-05-07 16:20:34.732  WARN 69502 --- [ctor-http-nio-2] .a.w.r.e.DefaultErrorWebExceptionHandler : Failed to handle request [GET http://127.0.0.1:10000/consumer/hello/windmt]: Response status 404
+```
+
+可以看到 Spring Cloud Gateway 确实为我们的 producer 和 consumer 自动创建了对应的路由，但是这里的 pattern/regexp 里都是大写的。那我们就换成大写的来试一下。
+
+访问 http://localhost:10000/CONSUMER/hello/windmt 确实返回了 “Hello, windmt!”，这时再看 log
+
+```
+2018-05-07 16:32:06.473 DEBUG 69502 --- [ctor-http-nio-2] o.s.c.g.h.RoutePredicateHandlerMapping   : Route matched: CompositeDiscoveryClient_CONSUMER
+2018-05-07 16:32:06.473 DEBUG 69502 --- [ctor-http-nio-2] o.s.c.g.h.RoutePredicateHandlerMapping   : Mapping [Exchange: GET http://localhost:10000/CONSUMER/hello/windmt] to Route{id='CompositeDiscoveryClient_CONSUMER', uri=lb://CONSUMER, order=0, predicate=org.springframework.cloud.gateway.handler.predicate.PathRoutePredicateFactory$$Lambda$511/504641976@1ccb8d30, gatewayFilters=[OrderedGatewayFilter{delegate=org.springframework.cloud.gateway.filter.factory.RewritePathGatewayFilterFactory$$Lambda$513/1057677564@19e672a5, order=1}]}
+2018-05-07 16:32:06.473 DEBUG 69502 --- [ctor-http-nio-2] o.s.c.g.handler.FilteringWebHandler      : Sorted gatewayFilterFactories: [OrderedGatewayFilter{delegate=GatewayFilterAdapter{delegate=org.springframework.cloud.gateway.filter.NettyWriteResponseFilter@376e7531}, order=-1}, OrderedGatewayFilter{delegate=org.springframework.cloud.gateway.filter.factory.RewritePathGatewayFilterFactory$$Lambda$513/1057677564@19e672a5, order=1}, OrderedGatewayFilter{delegate=GatewayFilterAdapter{delegate=org.springframework.cloud.gateway.filter.RouteToRequestUrlFilter@5782d777}, order=10000}, OrderedGatewayFilter{delegate=GatewayFilterAdapter{delegate=org.springframework.cloud.gateway.filter.LoadBalancerClientFilter@75e710b}, order=10100}, OrderedGatewayFilter{delegate=GatewayFilterAdapter{delegate=org.springframework.cloud.gateway.filter.AdaptCachedBodyGlobalFilter@23202c31}, order=2147483637}, OrderedGatewayFilter{delegate=GatewayFilterAdapter{delegate=org.springframework.cloud.gateway.filter.WebsocketRoutingFilter@b016b4e}, order=2147483646}, OrderedGatewayFilter{delegate=GatewayFilterAdapter{delegate=org.springframework.cloud.gateway.filter.NettyRoutingFilter@26f7cdf8}, order=2147483647}, OrderedGatewayFilter{delegate=GatewayFilterAdapter{delegate=org.springframework.cloud.gateway.filter.ForwardRoutingFilter@4f824872}, order=2147483647}]
+```
+
+可以看出，Spring Cloud Gateway 自动的为我们的 consumer 创建了一个路由，类似于下边这样
+
+```yml
+routes:
+  - id: CompositeDiscoveryClient_CONSUMER
+    uri: lb://CONSUMER
+    order: 0
+    predicates:
+      - Path=/CONSUMER/**
+    filters:
+      - RewritePath=/CONSUMER/(?<segment>.*), /$\{segment}
+```
+
+##### 2.1.5.5、 另一种路由配置方式
+
+Spring Cloud Gateway 也支持通过 Java 的流式 API 进行路由的定义，如下就是一个和上边通过配置文件配置的等效的路由，并且可以和配置文件搭配使用。
+
+```java
+@Bean
+public RouteLocator customerRouteLocator(RouteLocatorBuilder builder) {
+    // @formatter:off
+    return builder.routes()
+            .route(r -> r.path("/fluent/customer/**")
+                         .filters(f -> f.stripPrefix(2)
+                                        .addResponseHeader("X-Response-Default-Foo", "Default-Bar"))
+                         .uri("lb://CONSUMER")
+                         .order(0)
+                         .id("fluent_customer_service")
+            )
+            .build();
+    // @formatter:on
+}
+```
+
+### 2.2、路由断言 Predicate
+
+Spring Cloud Gateway 是通过 Spring WebFlux 的 `HandlerMapping` 做为底层支持来匹配到转发路由，Spring Cloud Gateway 内置了很多 `Predicates` 工厂，这些 `Predicates` 工厂通过不同的 HTTP 请求参数来匹配，多个 Predicates 工厂可以组合使用（比如：与，或，非）。
+
+#### 2.2.1、Predicate介绍
+
+Predicate 来源于 Java 8，是 Java 8 中引入的一个函数，Predicate 接受一个输入参数，返回一个布尔值结果。该接口包含多种默认方法来将 Predicate 组合成其他复杂的逻辑（比如：与，或，非）。可以用于接口请求参数校验、判断新老数据是否有变化需要进行更新操作。
+
+在 Spring Cloud Gateway 中 Spring 利用 Predicate 的特性实现了各种路由匹配规则，有通过 Header、请求参数等不同的条件来进行作为条件匹配到对应的路由。网上有一张图总结了 Spring Cloud 内置的几种 Predicate 的实现。
+
+<img src="./img/spring-cloud-gateway3.png" alt="img" style="zoom: 150%;" />
+
+在上图中，有很多类型的Predicate,比如说时间类型的Predicated（`AfterRoutePredicateFactory` `BeforeRoutePredicateFactory` `BetweenRoutePredicateFactory`），当只有满足特定时间要求的请求会进入到此`predicate`中，并交由router处理；`cookie`类型的`CookieRoutePredicateFactory`，指定的cookie满足正则匹配，才会进入此`router`;以及`host`、`method`、`path`、`querparam`、`remoteaddr`类型的predicate，每一种predicate都会对当前的客户端请求进行判断，是否满足当前的要求，如果满足则交给当前请求处理。如果有很多个Predicate，并且一个请求满足多个Predicate，则按照配置的顺序第一个生效。
+
+说白了 `Predicate` 就是为了实现一组匹配规则，方便让请求过来找到对应的 Route 进行处理。
+
+#### 2.2.2、通过时间匹配
+
+> Predicate 支持设置一个时间，在请求进行转发的时候，可以通过判断在这个时间之前或者之后进行转发。
+
+**After Route Predicate Factory**
+
+比如我们现在设置只有在2020年1月1日才会转发到百度首页，在这之前不进行转发，我就可以这样配置：
+
+```yml
+server:
+  port: 15000
+spring:
+  application:
+    name: api-gateway
+  cloud:
+    gateway:
+      routes:
+        - id: gateway-service
+          uri: https://www.baidu.com
+          order: 0
+          predicates:
+            - After=2020-01-01T00:00:00+08:00[Asia/Shanghai]
+```
+
+Spring 是通过 `ZonedDateTime` 来对时间进行的对比，`ZonedDateTime` 是 Java 8 中日期时间功能里，用于表示带时区的日期与时间信息的类，ZonedDateTime 支持通过时区来设置时间，中国的时区是：`Asia/Shanghai`。
+
+> `After Route Predicate` 是指在这个时间之后的请求都转发到目标地址。上面的示例是指，请求时间在 2019年1月1日0点0分0秒之后的所有请求都转发到地址https://www.baidu.com。+08:00是指时间和UTC时间相差八个小时，时间地区为`Asia/Shanghai`。
+
+`After=2020-01-01T00:00:00+08:00[Asia/Shanghai]` 会被解析成`PredicateDefinition`对象 （name =After ，args= 2020-01-01T00:00:00+08:00[Asia/Shanghai]）。在这里需要注意的是`predicates`的After这个配置，遵循的契约大于配置的思想，它实际被`AfterRoutePredicateFactory`这个类所处理，这个After就是指定了它的`Gateway web handler`类为`AfterRoutePredicateFactory`，同理，其他类型的predicate也遵循这个规则。
+
+**Before Route Predicate Factory**
+
+`Before Route Predicate Factory`采用一个参数——日期时间。在该日期时间之前发生的请求都将被匹配。
+
+```yml
+server:
+  port: 15000
+spring:
+  application:
+    name: api-gateway
+  cloud:
+    gateway:
+      routes:
+        - id: gateway-service
+          uri: https://www.baidu.com
+          order: 0
+          predicates:
+            - Before=2012-01-01T00:00:00+08:00[Asia/Shanghai]
+```
+
+> 表示在这个时间之前可以进行路由，在这时间之后停止路由
+
+**Between Route Predicate Factory**
+
+Between 路由断言 Factory有两个参数，datetime1和datetime2。在datetime1和datetime2之间的请求将被匹配。datetime2参数的实际时间必须在datetime1之后。
+
+```yml
+server:
+  port: 15000
+spring:
+  application:
+    name: api-gateway
+  cloud:
+    gateway:
+      routes:
+        - id: gateway-service
+          uri: https://www.baidu.com
+          order: 0
+          predicates:
+            - Between=2020-01-01T00:00:00+08:00[Asia/Shanghai],2020-02-01T00:00:00+08:00[Asia/Shanghai]
+```
+
+这样设置就意味着在这个时间段内可以匹配到此路由，超过这个时间段范围则不会进行匹配。通过时间匹配路由的功能很酷，可以用在限时活动的一些场景中。
+
+#### 2.2.3、通过Cookie匹配
+
+`Cookie Route Predicate` 可以接收两个参数，一个是 `Cookie name` ,一个是正则表达式，路由规则会通过获取对应的 Cookie name 值和正则表达式去匹配，如果匹配上就会执行路由，如果没有匹配上则不执行。
+
+```yml
+server:
+  port: 15000
+spring:
+  application:
+    name: api-gateway
+  cloud:
+    gateway:
+      routes:
+        - id: gateway-service
+          uri: https://www.baidu.com
+          order: 0
+          predicates:
+            - Cookie=sessionId, test
+```
+
+使用 curl 测试，命令行输入:
+
+```sh
+curl http://localhost:15000 --cookie "sessionId=test"
+```
+
+#### 2.2.4、通过Header匹配
+
+`Header Route Predicate` 和 `Cookie Route Predicate` 一样，也是接收 2 个参数，一个 `header` 中属性名称和一个正则表达式，这个属性值和正则表达式匹配则执行。
+
+```yml
+server:
+  port: 15000
+spring:
+  application:
+    name: api-gateway
+  cloud:
+    gateway:
+      routes:
+        - id: gateway-service
+          uri: https://www.baidu.com
+          order: 0
+          predicates:
+            - Header=X-Request-Id, \d+
+```
+
+在上面的配置中，当请求的`Header`中有`X-Request-Id`的header名，且header值为数字时，请求会被路由到配置的 uri. 使用curl执行以下命令:
+
+```sh
+curl http://localhost:15000  -H "X-Request-Id:88" 
+```
+
+返回页面代码证明匹配成功。将参数`-H "X-Request-Id:88"`改为`-H "X-Request-Id:spring"`再次执行时返回404证明没有匹配。
+
+#### 2.2.5、通过 Host 匹配
+
+`Host Route Predicate`接收一组参数，一组匹配的域名列表，这个模板是一个 ant 分隔的模板，用 "`.`" 号作为分隔符。它通过参数中的主机地址作为匹配规则。另**外Host头来源有两种：第一种是请求地址；第二种是自己在http的header头中放入Host变量值。**
+
+```yml
+server:
+  port: 15000
+spring:
+  application:
+    name: api-gateway
+  cloud:
+    gateway:
+      routes:
+        - id: gateway-service
+          uri: https://www.baidu.com
+          order: 0
+          predicates:
+            - Host=**.baidu.com
+```
+
+使用 curl 测试，命令行输入:
+
+```sh
+curl http://localhost:15000 -H "Host: www.baidu.com" 
+curl http://localhost:15000 -H "Host: md.baidu.com" 
+```
+
+经测试以上两种 host 均可匹配到 `host_route` 路由，去掉 host 参数则会报 404 错误。
+
+**注意：**
+
+此断言提取URI模板变量（如上面示例中定义的子变量）作为名称和值的映射，并将其放置在`ServerWebExchange.getAttributes（）`中，其键在`ServerWebExchangeUtils.URI_TEMPLATE_VARIABLES_ATTRIBUTE`属性中定义。这些值随后可供网关过滤器工厂（ [GatewayFilter Factories](https://links.jianshu.com/go?to=https%3A%2F%2Fcloud.spring.io%2Fspring-cloud-gateway%2Fspring-cloud-gateway.html%23gateway-route-filters)）使用。
+
+在过滤其中加入如下代码示例：
+
+```java
+Map uri_template_variables_attribute=exchange.getAttribute(ServerWebExchangeUtils.URI_TEMPLATE_VARIABLES_ATTRIBUTE);
+
+  // Map variables=ServerWebExchangeUtils.getUriTemplateVariables(exchange);
+
+   uri_template_variables_attribute.forEach((K,V)->{
+
+      System.out.println("K:"+K+"--V:"+V);
+
+   });
+```
+
+   访问Host为：www.myhost.org
+
+   输出结果： K:sub--V:www
+
+ANT通配符有三种：
+
+![img](./img/6689132-d27f09e667cd182d.webp)
+
+#### 2.2.6、通过请求方式匹配
+
+`Method Routes Predicate`可以通过是 POST、GET、PUT、DELETE 等不同的请求方式来进行路由。
+
+Method Route Predicate Factory 只有一个参数：HTTP method。且值必须是大写。
+
+```yml
+server:
+  port: 15000
+spring:
+  application:
+    name: api-gateway
+  cloud:
+    gateway:
+      routes:
+        - id: gateway-service
+          uri: https://www.baidu.com
+          order: 0
+          predicates:
+            - Method=GET
+```
+
+此路由匹配GET方法的请求。
+
+#### 2.2.7、通过请求路径匹配
+
+`Path Route Predicate Factory` 包含两个参数：列表（`Spring PathMatcher`模式，默认也是`AntMather`模式） 和可选`matchOptionalTrailingSeparator`。
+
+```yml
+server:
+  port: 15000
+spring:
+  application:
+    name: api-gateway
+  cloud:
+    gateway:
+      routes:
+        - id: gateway-service
+          uri: https://www.baidu.com
+          order: 0
+          predicates:
+            - Path=/customer/{segment},/foo/{segment}
+```
+
+此路由匹配请求如下：`/customer/1、/customer/foo或/foo/{segment}` 的请求都将被匹配
+
+此断言提取URI模板变量（如上面示例中定义的子变量）作为名称和值的映射，并将其放置在ServerWebExchange.getAttributes（）中，其键在ServerWebExchangeUtils.URI_TEMPLATE_VARIABLES_ATTRIBUTE属性中定义。这些值随后可供网关过滤器工厂（ [GatewayFilter Factories](https://links.jianshu.com/go?to=https%3A%2F%2Fcloud.spring.io%2Fspring-cloud-gateway%2Fspring-cloud-gateway.html%23gateway-route-filters)）使用。
+
+可以使用以下方法来更方便地访问这些变量。
+
+```java
+Map<String, String> uriVariables = ServerWebExchangeUtils.getPathPredicateVariables(exchange);
+
+String segment = uriVariables.get("segment");
+```
+
+#### 2.2.8、通过请求参数匹配
+
+`Query Route Predicate` 支持传入两个参数，一个是属性名一个为属性值，属性值可以是正则表达式。
+
+```yaml
+server:
+  port: 15000
+spring:
+  application:
+    name: api-gateway
+  cloud:
+    gateway:
+      routes:
+        - id: gateway-service
+          uri: https://www.baidu.com
+          order: 0
+          predicates:
+            - Query=smile
+```
+
+这样配置，只要请求中包含 smile 属性名的参数即可匹配路由。
+
+使用 curl 测试，命令行输入:
+
+```shell
+curl localhost:8080?smile=x&id=2
+```
+
+经过测试发现只要请求汇总带有 smile 参数即会匹配路由，不带 smile 参数则不会匹配。
+
+还可以将 Query 的值以键值对的方式进行配置，这样在请求过来时会对属性值和正则进行匹配，匹配上才会走路由。
+
+```yaml
+server:
+  port: 15000
+spring:
+  application:
+    name: api-gateway
+  cloud:
+    gateway:
+      routes:
+        - id: gateway-service
+          uri: https://www.baidu.com
+          order: 0
+          predicates:
+            - Query=keep, pu.
+```
+
+这样只要当请求中包含 keep 属性并且参数值是以 pu 开头的长度为三位的字符串才会进行匹配和路由。
+
+使用 curl 测试，命令行输入:
+
+```shell
+curl localhost:8080?keep=pub
+```
+
+测试可以返回页面代码，将 keep 的属性值改为 pubx 再次访问就会报 404,证明路由需要匹配正则表达式才会进行路由。
+
+#### 2.2.9、 通过请求 ip 地址进行匹配
+
+`RemoteAddr Route Predicate Factory` 包括 [CIDR-notation](https://links.jianshu.com/go?to=https%3A%2F%2Fblog.csdn.net%2Fdan15188387481%2Farticle%2Fdetails%2F49873923) (IPv4 or IPv6) 列表，至少有一个地址，例如：192.168.0.1/16 (192.168.0.1是IP地址， 16是子网掩码）。
+
+```yml
+server:
+  port: 15000
+spring:
+  application:
+    name: api-gateway
+  cloud:
+    gateway:
+      routes:
+        - id: gateway-service
+          uri: https://www.baidu.com
+          order: 0
+          predicates:
+            - RemoteAddr=192.168.0.1/0
+```
+
+此路由匹配远程请求地址满足上述地址的，例如192.168.0.103，（前24位代表网络地址，最后8位代表主机数量）。
+
+> *备注：本地调试时，可以根据ip地址进行访问，不要用localhost或者127.0.0.1进行访问。*
+
+可以将此地址设置为本机的 ip 地址进行测试。
+
+```
+http://192.168.0.103:15000/
+```
+
+##### 修改远程地址的解析方式
+
+https://www.jianshu.com/p/04914b5e398f
+
+https://blog.csdn.net/guying4875/article/details/88390111
+
+#### 2.2.10、组合使用
+
+```java
+server:
+  port: 8080
+spring:
+  application:
+    name: api-gateway
+  cloud:
+    gateway:
+      routes:
+        - id: gateway-service
+          uri: https://www.baidu.com
+          order: 0
+          predicates:
+            - Host=**.foo.org
+            - Path=/headers
+            - Method=GET
+            - Header=X-Request-Id, \d+
+            - Query=foo, ba.
+            - Query=baz
+            - Cookie=chocolate, ch.p
+            - After=2018-01-20T06:06:06+08:00[Asia/Shanghai]
+```
+
+各种 `Predicates` 同时存在于同一个路由时，请求必须同时满足所有的条件才被这个路由匹配。
+
+> 一个请求满足多个路由的谓词条件时，请求只会被首个成功匹配的路由转发
+
+### 2.3、路由过滤器 Filter
+
+#### 2.3.1、Filter的作用
+
+当我们有很多个服务时，比如下图中的user-service、goods-service、sales-service等服务，客户端请求各个服务的Api时，每个服务都需要做相同的事情，比如鉴权、限流、日志输出等。
+
+![2019080210016_1.png](./img/2019080210016_1.png)
+
+对于这样重复的工作，有没有办法做的更好，答案是肯定的。在微服务的上一层加一个全局的权限控制、限流、日志输出的Api Gatewat服务，然后再将请求转发到具体的业务服务层。这个Api Gateway服务就是起到一个服务边界的作用，外接的请求访问系统，必须先通过网关层。
+
+![2019080210016_2.png](./img/2019080210016_2.png)
+
+#### 2.3.2、Filter的生命周期
+
+Spring Cloud Gateway 的 Filter 的生命周期不像 Zuul 的那么丰富，它只有两个：“`pre`” 和 “`post`”。客户端的请求先经过“pre”类型的filter，然后将请求转发到具体的业务服务，比如上图中的user-service，收到业务服务的响应之后，再经过“post”类型的filter处理，最后返回响应到客户端。
+
+![2019080210016_3.png](img/2019080210016_3.png)
+
+- PRE： 这种过滤器在请求被路由之前调用。我们可利用这种过滤器实现身份验证、在集群中选择请求的微服务、记录调试信息等。
+- POST：这种过滤器在路由到微服务以后执行。这种过滤器可用来为响应添加标准的 HTTP Header、收集统计信息和指标、将响应从微服务发送给客户端等。
+
+与zuul不同的是，filter除了分为“pre”和“post”两种方式的filter外，在Spring Cloud Gateway中，filter从作用范围可分为另外两种，一种是**针对于单个路由或一个分组路由的`gateway filter`**，它在配置文件中的写法同predict类似；**另外一种是针对于所有路由的`global gateway filer`**。
+
+> 利用 `GatewayFilter` 可以修改 Http 的请求或者响应，或者根据请求或者响应做一些特殊的限制。 更多时候我们会利用 `GatewayFilter` 做一些具体的路由配置。
+
+#### 2.3.3、Filter 内置过滤器
+
+过滤器允许以某种方式修改传入的HTTP请求或传出的HTTP响应。过滤器可以限定作用在某些特定请求路径上。 Spring Cloud Gateway包含许多内置的GatewayFilter工厂。
+
+GatewayFilter工厂同上一篇介绍的Predicate工厂类似，都是在配置文件application.yml中配置，遵循了约定大于配置的思想，只需要在配置文件配置GatewayFilter Factory的名称，而不需要写全部的类名，比如`AddRequestHeaderGatewayFilterFactory`只需要在配置文件中写`AddRequestHeader`，而不是全部类名。在配置文件中配置的`GatewayFilter` Factory最终都会相应的过滤器工厂类处理。
+
+Spring Cloud Gateway 内置的过滤器工厂一览表如下：
+
+<img src="./img/2019080210016_4.png" alt="2019080210016_4.png" style="zoom:200%;" />
+
+##### AddRequestHeader GatewayFilter Factory
+
+在工程的配置文件中，加入以下的配置：
+
+```yml
+    server:
+      port: 8081
+    spring:
+      profiles:
+        active: add_request_header_route
+
+    ---
+    spring:
+      cloud:
+        gateway:
+          routes:
+          - id: add_request_header_route
+            uri: http://httpbin.org:80/get
+            filters:
+            - AddRequestHeader=X-Request-Foo, Bar
+            predicates:
+            - After=2017-01-20T17:42:47.789-07:00[America/Denver]
+      profiles: add_request_header_route
+```
+
+在上述的配置中，工程的启动端口为8081，配置文件为add_request_header_route，在add_request_header_route配置中，配置了roter的id为add_request_header_route，路由地址为http://httpbin.org:80/get，该router有AfterPredictFactory，有一个filter为`AddRequestHeaderGatewayFilterFactory`(约定写成AddRequestHeader)，AddRequestHeader过滤器工厂会在请求头加上一对请求头，名称为X-Request-Foo，值为Bar。为了验证AddRequestHeaderGatewayFilterFactory是怎么样工作的，查看它的源码，AddRequestHeaderGatewayFilterFactory的源码如下：
+
+```java
+    public class AddRequestHeaderGatewayFilterFactory extends AbstractNameValueGatewayFilterFactory {
+
+        @Override
+        public GatewayFilter apply(NameValueConfig config) {
+            return (exchange, chain) -> {
+                ServerHttpRequest request = exchange.getRequest().mutate()
+                        .header(config.getName(), config.getValue())
+                        .build();
+
+                return chain.filter(exchange.mutate().request(request).build());
+            };
+        }
+
+    }
+```
+
+由上面的代码可知，根据旧的ServerHttpRequest创建新的 ServerHttpRequest ，在新的ServerHttpRequest加了一个请求头，然后创建新的 ServerWebExchange ，提交过滤器链继续过滤。
+
+启动工程，通过curl命令来模拟请求：
+
+```
+    curl localhost:8081
+```
+
+最终显示了从 [http://httpbin.org:80/get得到了请求，响应如下：](http://httpbin.org/get得到了请求，响应如下：)
+
+```json
+    {
+      "args": {},
+      "headers": {
+        "Accept": "*/*",
+        "Connection": "close",
+        "Forwarded": "proto=http;host=\"localhost:8081\";for=\"0:0:0:0:0:0:0:1:56248\"",
+        "Host": "httpbin.org",
+        "User-Agent": "curl/7.58.0",
+        "X-Forwarded-Host": "localhost:8081",
+        "X-Request-Foo": "Bar"
+      },
+      "origin": "0:0:0:0:0:0:0:1, 210.22.21.66",
+      "url": "http://localhost:8081/get"
+    }
+```
+
+可以上面的响应可知，确实在请求头中加入了`X-Request-Foo`这样的一个请求头，在配置文件中配置的AddRequestHeader过滤器工厂生效。
+
+> 跟`AddRequestHeader`过滤器工厂类似的还有`AddResponseHeader`过滤器工厂，在此就不再重复。
+
+##### AddRequestParameter GatewayFilter Factory
+
+在工程的配置文件中，加入以下的配置：
+
+```yml
+    server:
+      port: 8081
+    spring:
+      profiles:
+        active: add_request_header_route
+
+    ---
+    spring:
+      cloud:
+        gateway:
+          routes:
+          - id: add_request_header_route
+            uri: http://httpbin.org:80/get
+            filters:
+            - AAddRequestParameter=foo, bar
+            predicates:
+            - After=2017-01-20T17:42:47.789-07:00[America/Denver]
+      profiles: add_request_header_route
+```
+
+> 将所有匹配的请求，添加 foo=bar参数信息。
+>
+
+##### RewritePath GatewayFilter Factory
+
+在Nginx服务启中有一个非常强大的功能就是重写路径，Spring Cloud Gateway默认也提供了这样的功能，这个功能是Zuul没有的。在配置文件中加上以下的配置：
+
+```yml
+    spring:
+      profiles:
+        active: rewritepath_route
+    ---
+    spring:
+      cloud:
+        gateway:
+          routes:
+          - id: rewritepath_route
+            uri: https://blog.csdn.net
+            predicates:
+            - Path=/foo/**
+            filters:
+            - RewritePath=/foo/(?<segment>.*), /$\{segment}
+      profiles: rewritepath_route
+```
+
+上面的配置中，所有的`/foo/**`开始的路径都会命中配置的`router`，并执行过滤器的逻辑，在本案例中配置了`RewritePath`过滤器工厂，此工厂将`/foo/(?.*)`重写为`{segment}`，然后转发到https://blog.csdn.net。比如在网页上请求localhost:8081/foo/forezp，此时会将请求转发到https://blog.csdn.net/forezp的页面，比如在网页上请求localhost:8081/foo/forezp/1，页面显示404，就是因为不存在https://blog.csdn.net/forezp/1这个页面。
+
+##### 其它内置过滤器
+
+> Spring Cloud Gateway内置了19种强大的过滤器工厂。
+>
+
+https://www.jianshu.com/p/b8b194bf2099
+
+https://blog.csdn.net/guying4875/article/details/88390111
+
+#### 2.3.4、自定义过滤器
+
+现在假设我们要统计某个服务的响应时间，我们可以在代码中
+
+```java
+long beginTime = System.currentTimeMillis();
+// do something...
+long elapsed = System.currentTimeMillis() - beginTime;
+log.info("elapsed: {}ms", elapsed);
+```
+
+每次都要这么写是不是很烦？Spring 告诉我们有个东西叫 AOP。但是我们是微服务啊，在每个服务里都写也很烦。这时候就该网关的过滤器登台表演了。
+
+自定义过滤器需要实现 `GatewayFilter` 和 `Ordered`接口。其中 `GatewayFilter` 中的这个方法就是用来实现你的自定义的逻辑的
+
+```java
+Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain);
+```
+
+而 `Ordered` 中的 `int getOrder()` 方法是来给过滤器设定优先级别的，值越大则优先级越低。
+
+**代码如下：**
+
+```java
+/**
+ * gateway自定义过滤器
+ * 现在假设我们要统计某个服务的响应时间
+ * @author Administrator
+ * @version 1.0.0
+ * @description
+ * @className RequestFilter.java
+ * @createTime 2020年02月07日 20:20:00
+ */
+public class RequestFilter implements GatewayFilter, Ordered {
+
+    private static final Log LOG = LogFactory.getLog(GatewayFilter.class);
+    private static final String ELAPSED_TIME_BEGIN = "requestTimeBegin";
+
+    /**
+     * 编写过滤器逻辑
+     * @title filter
+     * @author Jjcc
+     * @param exchange
+     * @param chain
+     * @return reactor.core.publisher.Mono<java.lang.Void>
+     * @createTime 2020/2/8 0008 12:28
+     */
+    @Override
+    public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
+        // chain.filter(exchange)方法之前属于“pre”过滤器。（在请求被路由之前执行的过滤器）
+        exchange.getAttributes().put(ELAPSED_TIME_BEGIN, System.currentTimeMillis());
+
+        return chain.filter(exchange).then(
+                Mono.fromRunnable(() -> {
+                    // Runnable中定义的就是“post”过滤器。（在请求被路由后执行的过滤器）
+                    Long startTime = exchange.getAttribute(ELAPSED_TIME_BEGIN);
+                    Optional<Long> startTime1 = Optional.ofNullable(startTime);
+                    if (startTime1.isPresent()) {
+                        LOG.info(exchange.getRequest().getURI().getRawPath() +
+                                "：" + (System.currentTimeMillis() - startTime1.orElseThrow(
+                                RuntimeException::new
+                        )));
+                    }
+                })
+        );
+    }
+
+    /**
+     * 过滤器设置优先级别。值越大，优先级越低。
+     * @title getOrder
+     * @author Jjcc
+     * @return int
+     * @createTime 2020/2/8 0008 12:28
+     */
+    @Override
+    public int getOrder() {
+        return Ordered.LOWEST_PRECEDENCE;
+    }
+}
+```
+
+我们在请求刚刚到达时，往 `ServerWebExchange` 中放入了一个属性 `elapsedTimeBegin`，属性值为当时的毫秒级时间戳。然后在请求执行结束后，又从中取出我们之前放进去的那个时间戳，与当前时间的差值即为该请求的耗时。因为这是与业务无关的日志所以将 `Ordered` 设为 `Integer.MAX_VALUE` 以降低优先级。
+
+现在再来看我们之前的问题：怎么来区分是 “pre” 还是 “post” 呢？其实就是 `chain.filter(exchange)` 之前的就是 “pre” 部分，之后的也就是 `then` 里边的是 “post” 部分。
+
+**创建好 Filter 之后我们将它添加到我们的 `Filter Chain` 里边**
+
+```java
+/**
+ * 通过java的流式API创建一个路由。
+ * @author Administrator
+ * @version 1.0.0
+ * @description
+ * @className FilterChain.java
+ * @createTime 2020年02月07日 20:49:00
+ */
+@Configuration
+public class FilterChain {
+
+    /**
+     * 该链式编程中所有方法名都与配置文件中配置路由的属性名一样。
+     * 配置predicate则不一样。
+     * @title customerRouteLocator
+     * @author Jjcc
+     * @param builder
+     * @return org.springframework.cloud.gateway.route.RouteLocator
+     * @createTime 2020/2/8 0008 12:35
+     */
+    @Bean
+    public RouteLocator customerRouteLocator(RouteLocatorBuilder builder) {
+
+        return builder.routes()
+                .route(r -> r.path("/fluent/customer/**")
+                        .filters(f -> f.stripPrefix(2)
+                                .filter(new RequestFilter())
+                                .addResponseHeader("X-Response-Default-Foo", "Default-Bar"))
+                        .uri("lb://EUREKA-CONSUMER")
+                        .order(0)
+                        .id("fluent_customer_service")
+                )
+                .build();
+    }
+}
+```
+
+重启程序，通过curl命令模拟请求：
+
+```shell
+curl http://localhost:15000/fluent/customer/hello/info%601
+```
+
+在程序的控制台输出一下的请求信息的日志：
+
+```
+2020-02-08 12:55:02.638  INFO 12724 --- [ctor-http-nio-3] o.s.cloud.gateway.filter.GatewayFilter   : /hello/info%601：0
+```
+
+#### 2.3.5、Gloabl Filters 全局过滤器
+
+`Spring Cloud GateWay`根据作用范围划分为`GatewayFilter`和`GloablFilter`，二者区别如下：
+
+- `GatewayFilter`：需要通过`spring.cloud.routes.filters`配置在具体路由下，只作用在当前路由上或通过spring.cloud.default-filters配置在全局，作用在所有路由上。
+- `GlobalFilter`：全局过滤器，不需要再配置文件中配置，作用在所有路由上，最终通过`GatewayFilterAdapter`包装成`GatewayFilterChain`可识别的过滤器，**它为请求业务以及路由的URI转换为真实业务服务的请求地址的核心过滤器，不需要配置，系统初始化时加载，并作用在每个路由上。**
+
+Spring Cloud Gateway框架内置的GlobalFilter如下：
+
+![2019080210016_6.png](./img/2019080210016_6.png)
+
+> 上图中每一个`GlobalFilter`都作用在每一个`router`上，能够满足大多数的需求。
+
+#### 2.3.6、自定义全局路由器
+
+前边讲了自定义的过滤器，那个过滤器只是局部的，如果我们有多个路由就需要一个一个来配置，**并不能**通过像下面这样来实现全局有效（也未在 `Fluent Java API` 中找到能设置 `defaultFilters` 的方法）
+
+```java
+@Bean
+public RequestFilter requestFilter(){
+    return new RequestFilter();
+}
+```
+
+这在我们要全局统一处理某些业务的时候就显得比较麻烦，比如像最开始我们说的要做身份校验，有没有简单的方法呢？这时候就该全局过滤器出场了。
+
+有了前边的基础，我们创建全局过滤器就简单多了。只需要把实现的接口 `GatewayFilter` 换成 `GlobalFilter`，就完事大吉了。比如下面的 Demo 就是从请求参数中获取 `token` 字段，如果能获取到就 pass，获取不到就直接返回 `401` 错误，虽然简单，但足以说明问题了。
+
+```java
+/**
+ * 自定义GlobalFilter全局过滤器
+ * @author Administrator
+ * @version 1.0.0
+ * @description
+ * @className GlobalFilterOne.java
+ * @createTime 2020年02月08日 13:46:00
+ */
+public class GlobalFilterOne implements GlobalFilter, Ordered {
+    @Override
+    public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
+        String token = exchange.getRequest().getQueryParams().getFirst("token");
+        Optional<String> tokenOpt = Optional.ofNullable(token);
+
+        if (!tokenOpt.isPresent()) {
+            //鉴权不通过
+            exchange.getResponse().setStatusCode(HttpStatus.UNAUTHORIZED);
+            return exchange.getResponse().setComplete();
+        }
+        // 鉴权通过，分发给过滤链中的下一个过滤器
+        return chain.filter(exchange);
+    }
+
+    @Override
+    public int getOrder() {
+        return Ordered.HIGHEST_PRECEDENCE;
+    }
+}
+```
+
+然后在 Spring Config 中配置这个 Bean
+
+```java
+/**
+     * 将自定义全局过滤器注册进spring容器
+     * @title myGlobalFilter
+     * @author Jjcc
+     * @return com.jjcc.gateway.filter.globalfilter.GlobalFilterOne
+     * @createTime 2020/2/8 0008 14:02
+     */
+    @Bean
+    public GlobalFilterOne myGlobalFilter() {
+        return new GlobalFilterOne();
+    }
+```
+
+启动工程，使用curl命令请求：
+
+```
+curl http://localhost:15000/fluent/customer/hello/info%601
+```
+
+重启应用就能看到效果了
+
+#### 2.3.7、自定义过滤器工厂
+
+配置文件中`filters`中使用的都是内置的过滤器工厂，如下：
+
+```yml
+filters:
+  - StripPrefix=1
+  - AddResponseHeader=X-Response-Default-Foo, Default-Bar
+```
+
+`StripPrefix`(`StripPrefixGatewayFilterFactory`)、`AddResponseHeader`(`AddResponseHeaderGatewayFilterFactory`) 这两个实际上是两个过滤器工厂（`GatewayFilterFactory`），各工厂名都省略了`GatewayFilterFactory`后缀，用这种配置的方式更灵活方便。
+
+我们就将之前的 `ReuquestFilter`自定义过滤器改造一下，让它能接收一个 `boolean` 类型的参数，来决定是否将请求参数也打印出来。
+
+```java
+/**
+ * 自定义单个参数的过滤器工厂
+ * 需要继承 AbstractGatewayFilterFactory类。
+ * 注意：工厂类中定义的参数名 "withParam"，即key名必须与内部类中的参数名（用于接收配置文件中参数值得变量）一致。
+ * @author Administrator
+ * @version 1.0.0
+ * @description
+ * @className ElapsedGatewayFilterFactory.java
+ * @createTime 2020年02月08日 16:40:00
+ */
+public class ElapsedGatewayFilterFactory
+        extends AbstractGatewayFilterFactory<ElapsedGatewayFilterFactory.Config> {
+
+    private static final Log log = LogFactory.getLog(GatewayFilter.class);
+    private static final String ELAPSED_TIME_BEGIN = "elapsedTimeBegin";
+    private static final String KEY = "withParam";
+
+    /**
+     * 自定义过滤器工厂的构造方法，必须调用父类的构造器把Config类型传递过去
+     * 否则会报 ClassCastException异常。
+     * @title ElapsedGatewayFilterFactory
+     * @author Jjcc
+     * @createTime 2020/2/9 0009 16:47
+     */
+    public ElapsedGatewayFilterFactory() {
+        super(Config.class);
+    }
+
+    /**
+     * 重写父类方法，将定义的key存储进List。
+     * @title shortcutFieldOrder
+     * @author Jjcc
+     * @return java.util.List<java.lang.String>
+     * @createTime 2020/2/9 0009 16:49
+     */
+    @Override
+    public List<String> shortcutFieldOrder() {
+        return Collections.singletonList(KEY);
+    }
+
+    @Override
+    public GatewayFilter apply(Config config) {
+        return (exchange, chain) -> {
+            exchange.getAttributes().put(ELAPSED_TIME_BEGIN, System.currentTimeMillis());
+            return chain.filter(exchange).then(
+                    Mono.fromRunnable(() -> {
+                                Long startTime = exchange.getAttribute(ELAPSED_TIME_BEGIN);
+                                Optional<Long> startTimeOpt = Optional.ofNullable(startTime);
+                                if (startTimeOpt.isPresent()) {
+                                    StringBuilder sb = new StringBuilder(exchange.getRequest().getURI().getPath())
+                                            .append("所用时间:")
+                                            .append(System.currentTimeMillis() - startTimeOpt.orElseThrow(RuntimeException::new))
+                                            .append("ms");
+                                    if (config.isWithParam()) {
+                                        sb.append("；parameter：").append(exchange.getRequest().getQueryParams());
+                                    }
+                                    log.info(sb.toString());
+                                }
+                            }
+                    )
+            );
+        };
+    }
+
+    public static class Config {
+        // 接收配置文件参数的变量
+        private boolean withParam;
+
+        public boolean isWithParam() {
+            return withParam;
+        }
+
+        public void setWithParam(boolean setWithParam) {
+            this.withParam = setWithParam;
+        }
+
+    }
+
+}
+```
+
+过滤器工厂的顶级接口是 `GatewayFilterFactory`，我们可以直接继承它的两个抽象类来简化开发 `AbstractGatewayFilterFactory` 和 `AbstractNameValueGatewayFilterFactory`，这两个抽象类的区别就是前者接收一个参数（像 `StripPrefix` 和我们创建的这种），后者接收两个参数（像 `AddResponseHeader`）。
+
+![img](img/006tNc79ly1fr4w5hwis7j30kx09v3zj.jpg)
+
+`GatewayFilter apply(Config config)` 方法内部实际上是创建了一个 `GatewayFilter` 的匿名类，具体实现和之前的几乎一样，就不解释了。
+
+静态内部类 `Config` 就是为了接收那个 `boolean` 类型的参数服务的，里边的变量名可以随意写，但是要重写 `List shortcutFieldOrder()` 这个方法。
+
+这里注意一下，一定要调用一下父类的构造器把 `Config` 类型传过去，否则会报 `ClassCastException`
+
+```java
+public ElapsedGatewayFilterFactory() {
+    super(Config.class);
+}
+```
+
+工厂类我们有了，再把它注册到 Spring 当中
+
+```java
+@Bean
+public ElapsedGatewayFilterFactory elapsedGatewayFilterFactory() {
+    return new ElapsedGatewayFilterFactory();
+}
+```
+
+然后添加配置（主要改动在第 10 行、第 35 行）
+
+```yml
+spring:
+  application:
+    name: api-gateway
+  cloud:
+    gateway:
+      discovery:
+        locator:
+          enabled: true
+      default-filters:
+#        - Elapsed=true               # 自定义过滤器，适用于所有在配置文件中定义的过滤器。经测试，并不适用于自定义过滤器。
+      routes:
+        - id: gateway-service         # 路由id
+          uri: lb://EUREKA-CONSUMER   # uri
+          order: 1
+          predicates:
+#            - After=2020-03-01T00:00:00+08:00[Asia/Shanghai]
+#            - Before=2020-03-01T00:00:00+08:00[Asia/Shanghai]
+#            - Between=2020-02-06T00:00:00+08:00[Asia/Shanghai],2020-03-01T00:00:00+08:00[Asia/Shanghai]
+#            - Cookie=sessionId, test
+#            - Header=X-request-Id, \d+
+#            - Host=**.baidu.com
+            - Method=GET
+            - Path=/customer/**
+            - RemoteAddr=192.168.0.1/0
+          filters:
+            - StripPrefix=1
+#            - AddResponseHeader=X-Response-Default-Foo, Default-Bar
+        - id: ageteway-service2
+          uri: lb://EUREKA-CONSUMER
+          order: 0
+          predicates:
+            - Path=/customer1/**
+          filters:
+            - StripPrefix=1
+            - Elapsed=true  # 自定义过滤器工厂
+```
+
+`spring.cloud.gateway.default-filters`：过滤器将应用于所有路由。（这里经测试，发现并没有应用于自定义过滤器中）。
+
+然后我们再次访问 http://localhost:15000/customer1/hello/windmt?token=1000 即可在控制台看到以下内容
+
+```
+2018-05-08 16:53:02.030  INFO 84423 --- [ctor-http-nio-1] o.s.cloud.gateway.filter.GatewayFilter   : /hello/windmt: 656ms params:{token=[1000]}
+```
+
+### 2.4、限流
+
+一般开发高并发系统常见的限流有：**限制总并发数**（比如数据库连接池、线程池）、**限制瞬时并发数**（如`nginx`的limit_conn模块、用来限制瞬时并发连接数）、**限制时间窗口内的平均速率**（如 `Guava` 的 RateLimiter、nginx 的 limit_req 模块，限制每秒的平均速率）；其他还有如**限制远程接口调用速率**、**限制MQ的消费速率**。另外**还可以根据网络连接数、网络流量、CPU或内存负载来做限流**。
+
+> 常见的限流方式，比如**`Hystrix`适用线程池隔离，超过线程池的负载，走熔断的逻辑**。在一般应用服务器中，比如tomcat容器也是通过限制它的线程数来控制并发的；也有通过时间窗口的平均速度来控制流量。常见的限流纬度有比如通过`Ip来限流、通过uri来限流、通过用户访问频次来限流`。
+>
+> 一般限流都是在网关这一层做，比如Nginx、Openresty、kong、zuul、Spring Cloud Gateway等；也可以在应用层通过Aop这种方式去做限流。
+
+#### 2.4.1、限流算法
+
+##### 2.4.1.1、计算机算法
+
+> 计数器算法采用计数器实现限流有点简单粗暴，**一般我们会限制一秒钟的能够通过的请求数，比如限流qps为100，算法的实现思路就是从第一个请求进来开始计时，在接下去的1s内，每来一个请求，就把计数加1，如果累加的数字达到了100，那么后续的请求就会被全部拒绝。等到1s结束后，把计数恢复成0，重新开始计数。**具体的实现可以是这样的：对于每次服务调用，可以通过AtomicLong#incrementAndGet()方法来给计数器加1并返回最新值，通过这个最新值和阈值进行比较。这种实现方式，相信大家都知道有一个弊端：**如果我在单位时间1s内的前10ms，已经通过了100个请求，那后面的990ms，只能眼巴巴的把请求拒绝，我们把这种现象称为“突刺现象”**。
+>
+> 常用的更平滑的限流算法有两种：漏桶算法和令牌桶算法。
+
+##### 2.4.1.2、漏桶算法
+
+漏桶（`Leaky Bucket`）算法为了消除"突刺现象"，可以采用漏桶算法实现限流，漏桶算法这个名字就很形象，**算法内部有一个容器，类似生活用到的漏斗，当请求进来时，相当于水倒入漏斗，然后从下端小口慢慢匀速的流出。不管上面流量多大，下面流出的速度始终保持不变**。不管服务调用方多么不稳定，通过漏桶算法进行限流，每10毫秒处理一次请求。**因为处理的速度是固定的，请求进来的速度是未知的，可能突然进来很多请求，没来得及处理的请求就先放在桶里，既然是个桶，肯定是有容量上限，如果桶满了，那么新进来的请求就丢弃，可以看出漏桶算法能强行限制数据的传输速率。**。
+
+![2019080210017_1.png](img/2019080210017_1.png)
+
+可见这里有两个变量，一个是桶的大小，支持流量突发增多时可以存多少的水（`burst`），另一个是水桶漏洞的大小（`rate`）。因为漏桶的漏出速率是固定的参数，所以，即使网络中不存在资源冲突（没有发生拥塞），漏桶算法也不能使流突发（`burst`）到端口速率。因此，**漏桶算法对于存在突发特性的流量来说缺乏效率**。
+
+> 在算法实现方面，可以准备一个队列，用来保存请求，另外通过一个线程池（ScheduledExecutorService）来定期从队列中获取请求并执行，可以一次性获取多个并发执行。
+
+##### 2.4.1.3、令牌算法
+
+令牌桶算法（Token Bucket）和 Leaky Bucket 效果一样但方向相反的算法，更加容易理解。从某种意义上讲，令牌桶算法是对漏桶算法的一种改进，**桶算法能够限制请求调用的速率，而令牌桶算法能够在限制调用的平均速率的同时还允许一定程度的突发调用。**
+
+在令牌桶算法中，**存在一个桶，用来存放固定数量的令牌**。算法中存在一种机制，**以一定的速率往桶中放令牌**。**每次请求调用需要先获取令牌，只有拿到令牌，才有机会继续执行，否则选择选择等待可用的令牌、或者直接拒绝**。放令牌这个动作是持续不断的进行，如果**桶中令牌数达到上限，就丢弃令牌**，所以就存在这种情况，**桶中一直有大量的可用令牌，这时进来的请求就可以直接拿到令牌执行**
+
+> 比如设置qps为100（如果 QPS=100，则间隔是 10ms），那么限流器初始化完成一秒后，桶中就已经有100个令牌了，这时服务还没完全启动好，等启动完成对外提供服务时，**该限流器可以抵挡瞬时的100个请求**。所以，只有桶中没有令牌时，请求才会进行等待，最后相当于以一定的速率执行。
+>
+> **简而言之就是，会一直创建令牌放入桶中，直到令牌数量达到桶上限。当一段时间没有请求进入，桶中的令牌会一直增加直到桶满，随后有一波请求调用进入，从桶中拿取令牌并执行，桶中令牌数目的请求调用不会有等待行为。**
+>
+> **`令牌算法限制请求调用速率即是获取桶中的令牌这一行为`。**
+
+![2019080210017_2.png](img/2019080210017_2.png)
+
+> 实现思路：可以准备一个队列，用来保存令牌，另外通过一个线程池定期生成令牌放到队列中，每来一个请求，就从队列中获取一个令牌，并继续执行。
+
+##### 2.4.1.4、漏桶算法 VS 令牌算法
+
+| 对比项     | Leakly bucket | Token bucket | Token bucket 的备注     |
+| :--------- | :------------ | :----------- | :---------------------- |
+| 依赖 token | 否            | 是           |                         |
+| 立即执行   | 是            | 否           | 有足够的 token 才能执行 |
+| 堆积 token | 否            | 是           |                         |
+| 速率恒定   | 是            | 否           | 可以大于设定的 QPS      |
+
+#### 2.4.2、限流实现
+
+在 Gateway 上实现限流是个不错的选择，只需要编写一个过滤器就可以了。
+
+我们这里采用令牌桶算法，Google Guava 的 `RateLimiter`、[Bucket4j](https://github.com/vladimir-bukhtoyarov/bucket4j)、[RateLimitJ](https://github.com/mokies/ratelimitj) 都是一些基于此算法的实现，只是他们支持的 back-ends（JCache、Hazelcast、Redis 等）不同罢了。
+
+##### 2.4.2.1、Bucket4j实现。
+
+这里我们使用 `Bucket4j`，引入它的依赖坐标，为了方便顺便引入 `Lombok`
+
+```xml
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-starter-gateway</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-starter-netflix-eureka-client</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis-reactive</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>com.github.vladimir-bukhtoyarov</groupId>
+            <artifactId>bucket4j-core</artifactId>
+            <version>4.0.0</version>
+        </dependency>
+```
+
+​	**实现具体的过滤器**
+
+```java
+/**
+ * 通过过滤器实现一个通过IP限流的策略；这里采用 bucket4j 实现，通过map来存储bucket。
+ * @author Administrator
+ * @version 1.0.0
+ * @description
+ * @className RateLimitByIPGatewayFilter.java
+ * @createTime 2020年02月12日 22:05:00
+ */
+@CommonsLog
+@Builder
+@Data
+@AllArgsConstructor
+@NoArgsConstructor
+public class RateLimitByIPGatewayFilter implements GatewayFilter, Ordered {
+
+    /**
+     * 桶的最大容量，桶装载token的最大数量。
+     */
+    int capacity;
+    /**
+     * 每次token补充量
+     */
+    int refillTokens;
+    /**
+     * token补充的时间间隔。
+     */
+    Duration refillDuration;
+
+    private static final Map<String, Bucket> CACHE = new ConcurrentHashMap<>();
+
+    private Bucket createNewBucket() {
+        Refill refill = Refill.of(refillTokens, refillDuration);
+        Bandwidth limit = Bandwidth.classic(capacity, refill);
+        return Bucket4j.builder().addLimit(limit).build();
+    }
+
+    @Override
+    public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
+        String ip = Objects.requireNonNull(exchange.getRequest().getRemoteAddress()).getAddress().getHostAddress();
+        // computeIfAbsent：如果key已经存在，则不再进行put操作，并返回value；如果key不存在，则进行put操作，并返回value。
+        Bucket bucket = CACHE.computeIfAbsent(ip, k -> createNewBucket());
+
+        log.debug("IP: " + ip + "，TokenBucket Available Tokens: " + bucket.getAvailableTokens());
+        // tryConsume：每次消耗的令牌数。
+        if (bucket.tryConsume(1)) {
+            return chain.filter(exchange);
+        } else {
+            exchange.getResponse().setStatusCode(HttpStatus.TOO_MANY_REQUESTS);
+            return exchange.getResponse().setComplete();
+        }
+    }
+
+    @Override
+    public int getOrder() {
+        return -1000;
+    }
+}
+```
+
+通过对令牌桶算法的了解，我们知道需要定义三个变量：
+
+- `capacity`：桶的最大容量，即能装载 Token 的最大数量
+- `refillTokens`：每次 Token 补充量
+- `refillDuration`：补充 Token 的时间间隔
+
+在这个实现中，我们使用了 IP 来进行限制，当达到最大流量就返回 `429` 错误。这里我们简单使用一个 Map 来存储 bucket，所以也决定了它只能单点使用，如果是分布式的话，可以采用 Hazelcast 或 Redis 等解决方案。
+
+在 Route 中我们添加这个过滤器，这里指定了 bucket 的容量为 10 且每一秒会补充 1 个 Token。
+
+```java
+    /**
+     * 一个包含通过IP限流策略的路由。
+     * @title rateLimitByIpGatewayFilter
+     * @author Jjcc
+     * @param routeLocatorBuilder
+     * @return org.springframework.cloud.gateway.route.RouteLocator
+     * @createTime 2020/2/12 0012 23:03
+     */
+    @Bean
+    public RouteLocator rateLimitByIpGatewayFilter(RouteLocatorBuilder routeLocatorBuilder) {
+        return routeLocatorBuilder.routes().route(r ->
+                r.path("/throttle/customer/**")
+                        .filters(f -> f.stripPrefix(2).filter(new RateLimitByIPGatewayFilter(10, 1, Duration.ofSeconds(1))))
+                .uri("lb://EUREKA-CONSUMER")
+                .id("throttle_customer_service")
+        ).build();
+    }
+```
+
+启动服务并多次快速刷新改接口，就会看到 Tokens 的数量在不断减小，等一会又会增加上来
+
+```
+2018-05-09 15:42:08.601 DEBUG 96278 --- [ctor-http-nio-2] com.windmt.filter.RateLimitByIpGatewayFilter  : IP: 0:0:0:0:0:0:0:1，TokenBucket Available Tokens: 2
+2018-05-09 15:42:08.958 DEBUG 96278 --- [ctor-http-nio-2] com.windmt.filter.RateLimitByIpGatewayFilter  : IP: 0:0:0:0:0:0:0:1，TokenBucket Available Tokens: 1
+2018-05-09 15:42:09.039 DEBUG 96278 --- [ctor-http-nio-2] com.windmt.filter.RateLimitByIpGatewayFilter  : IP: 0:0:0:0:0:0:0:1，TokenBucket Available Tokens: 0
+2018-05-09 15:42:10.201 DEBUG 96278 --- [ctor-http-nio-2] com.windmt.filter.RateLimitByIpGatewayFilter  : IP: 0:0:0:0:0:0:0:1，TokenBucket Available Tokens: 1
+```
+
+##### 2.4.2.2、RequestRateLimiter实现
+
+限速在高并发场景中比较常用的手段之一，可以有效的保障服务的整体稳定性，Spring Cloud Gateway 提供了基于 `Redis` 的限流方案。Spring Cloud Gateway 内置了一个 `RequestRateLimiterGatewayFilterFactory`。
+
+默认情况下，是基于**令牌桶算法**实现的限流
+
+**添加对应的依赖包`spring-boot-starter-data-redis-reactive`**
+
+```xml
+<dependency>
+  <groupId>org.springframework.boot</groupId>
+  <artifactId>spring-boot-starter-data-redis-reactive</artifactId>
+</dependency>
+```
+
+**配置文件中需要添加 Redis 地址和限流的相关配置**
+
+```yml
+spring:
+  cloud:
+    gateway:
+      discovery:
+        locator:
+          enabled: true # spring cloud gateway与eureka组合使用。
+      routes:
+        - id: gateway-service-0
+          uri: lb://EUREKA-CONSUMER   # uri
+          predicates:
+            - Method=GET
+            - Path=/customer/**
+          filters:
+            - StripPrefix=1
+            - name: RequestRateLimiter
+              args:
+                # 用于限流的键的解析器的Bean对象名称。它使用 SpEL 表达式根据#{@beanName}从 Spring 容器中获取 Bean 对象。
+                key-resolver: '#{@ipKeyResolver}'
+                # 令牌桶每秒填充的平均速率。
+                redis-rate-limiter.replenishRate: 1
+                # 令牌桶的最大容量数
+                redis-rate-limiter.burstCapacity: 5
+  redis:
+    host: localhost
+    port: 6379
+    database: 0
+```
+
+在上面的配置文件，指定了程序端口为15001，配置了`Redis`的信息，并配置了`RequestRateLimiter`的限流过滤器。该过滤器需要配置三个参数。
+
+- `key-resolver`：用于限流的键的解析器的Bean对象名称。它使用`SpEL`表达式根据#{@beanName}从 Spring容器中获取 Bean 对象。默认情况下，使用 `PrincipalNameKeyResolver`，以请求认证的 `java.security.Principal` 作为限流键。
+- `redis-rate-limiter.replenishRate`：令牌桶每秒填充的平均速率。
+- `redis-rate-limiter.burstCapacity`：令牌桶的最大容量数。
+
+> filter 名称必须是 RequestRateLimiter。`- name: RequestRateLimiter`
+
+**项目中设置限流的策略，创建 Config 类。**
+
+Config类需要加`@Configuration`注解。
+
+```java
+/**
+ * 通过 RequestRateLimiter 实现限流策略。
+ * @author Administrator
+ * @version 1.0.0
+ * @description
+ * @className Config.java
+ * @createTime 2020年02月14日 14:11:00
+ */
+@Configuration
+public class Config {
+
+    /**
+     * 根据IP限流
+     * @title ipKeyResolver
+     * @author Jjcc
+     * @return org.springframework.cloud.gateway.filter.ratelimit.KeyResolver
+     * @createTime 2020/2/14 0014 20:41
+     */
+    @Primary
+    @Bean
+    public KeyResolver ipKeyResolver() {
+        return exchange ->
+            Mono.just(Objects.requireNonNull(exchange.getRequest().getRemoteAddress()).getHostName());
+    }
+
+    /**
+     * 根据User参数限流
+     * @title userKeyResolver
+     * @author Jjcc
+     * @return org.springframework.cloud.gateway.filter.ratelimit.KeyResolver
+     * @createTime 2020/2/14 0014 20:47
+     */
+    @Bean
+    public KeyResolver userKeyResolver() {
+        return exchange -> Mono.just(Objects.requireNonNull(exchange.getRequest().getQueryParams().getFirst("user")));
+    }
+
+    /**
+     * 根据hostName限流
+     * @title hostNameResolver
+     * @author Jjcc
+     * @return org.springframework.cloud.gateway.filter.ratelimit.KeyResolver
+     * @createTime 2020/2/14 0014 20:51
+     */
+    @Bean
+    public KeyResolver hostNameResolver() {
+        return exchange -> Mono.just(Objects.requireNonNull(exchange.getRequest().getRemoteAddress()).getAddress().getHostAddress());
+    }
+
+    /**
+     * 根据uri限流
+     * @title uriKeyResolver
+     * @author Jjcc
+     * @return org.springframework.cloud.gateway.filter.ratelimit.KeyResolver
+     * @createTime 2020/2/14 0014 20:53
+     */
+    @Bean
+    public KeyResolver uriKeyResolver() {
+        return exchange -> Mono.just(Objects.requireNonNull(exchange.getRequest().getURI()).getPath());
+    }
+
+}
+```
+
+> **注意：如果定义了多个KeyResolver的Bean，需要使用`@Primary`注解来标注某个定义的KeyResolver。**
+
+
+
+用jmeter进行压测，配置10thread去循环请求lcoalhost:8081，循环间隔1s。从压测的结果上看到有部分请求通过，由部分请求失败。通过redis客户端去查看redis中存在的key。如下：
+
+[![2019080210017_4.png](img/2019080210017_4.png)](https://gitee.com/chenssy/blog-home/raw/master/image/series-images/microservice/spring-cloud/2019080210017_4.png)
+
+可见，RequestRateLimiter是使用Redis来进行限流的，并在redis中存储了2个key。关注这两个key含义可以看lua源代码。
+
+##### 2.4.2.3、基于系统负载的动态限流
+
+在实际工作中，我们可能还需要根据网络连接数、网络流量、CPU 或内存负载等来进行动态限流。在这里我们以 CPU 为栗子。
+
+我们需要借助 Spring Boot Actuator 提供的 Metrics 能力进行实现基于 CPU 的限流 —— 当 CPU 使用率高于某个阈值就开启限流，否则不开启限流。
+
+我们在项目中引入 Actuator 的依赖坐标
+
+```
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-actuator</artifactId>
+</dependency>
+```
+
+因为 Spring Boot 2.x 之后，Actuator 被重新设计了，和 1.x 的区别还是挺大的（参考[这里](http://www.baeldung.com/spring-boot-actuators)）。我们先在配置中设置 `management.endpoints.web.exposure.include=*` 来观察一下新的 Metrics 的能力
+
+http://localhost:10000/actuator/metrics
+
+```
+{
+  "names": [
+    "jvm.buffer.memory.used",
+    "jvm.memory.used",
+    "jvm.buffer.count",
+    "jvm.gc.memory.allocated",
+    "logback.events",
+    "process.uptime",
+    "jvm.memory.committed",
+    "system.load.average.1m",
+    "jvm.gc.pause",
+    "jvm.gc.max.data.size",
+    "jvm.buffer.total.capacity",
+    "jvm.memory.max",
+    "system.cpu.count",
+    "system.cpu.usage",
+    "process.files.max",
+    "jvm.threads.daemon",
+    "http.server.requests",
+    "jvm.threads.live",
+    "process.start.time",
+    "jvm.classes.loaded",
+    "jvm.classes.unloaded",
+    "jvm.threads.peak",
+    "jvm.gc.live.data.size",
+    "jvm.gc.memory.promoted",
+    "process.files.open",
+    "process.cpu.usage"
+  ]
+}
+```
+
+我们可以利用里边的系统 CPU 使用率 `system.cpu.usage`
+
+http://localhost:10000/actuator/metrics/system.cpu.usage
+
+```json
+{
+  "name": "system.cpu.usage",
+  "measurements": [
+    {
+      "statistic": "VALUE",
+      "value": 0.5189003436426117
+    }
+  ],
+  "availableTags": []
+}
+```
+
+最近一分钟内的平均负载 `system.load.average.1m` 也是一样的
+
+http://localhost:10000/actuator/metrics/system.load.average.1m
+
+```json
+{
+  "name": "system.load.average.1m",
+  "measurements": [
+    {
+      "statistic": "VALUE",
+      "value": 5.33203125
+    }
+  ],
+  "availableTags": []
+}
+```
+
+知道了 Metrics 提供的指标，我们就来看在代码里具体怎么实现吧。Actuator 2.x 里边已经没有了之前 1.x 里边提供的 `SystemPublicMetrics`，但是经过阅读源码可以发现 `MetricsEndpoint` 这个类可以提供类似的功能。就用它来撸代码吧
+
+```java
+@CommonsLog
+@Component
+public class RateLimitByCpuGatewayFilter implements GatewayFilter, Ordered {
+
+    @Autowired
+    private MetricsEndpoint metricsEndpoint;
+
+    private static final String METRIC_NAME = "system.cpu.usage";
+    private static final double MAX_USAGE = 0.50D;
+
+    @Override
+    public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
+        // if (!enableRateLimit){
+        //     return chain.filter(exchange);
+        // }
+        Double systemCpuUsage = metricsEndpoint.metric(METRIC_NAME, null)
+                .getMeasurements()
+                .stream()
+                .filter(Objects::nonNull)
+                .findFirst()
+                .map(MetricsEndpoint.Sample::getValue)
+                .filter(Double::isFinite)
+                .orElse(0.0D);
+
+        boolean ok = systemCpuUsage < MAX_USAGE;
+
+        log.debug("system.cpu.usage: " + systemCpuUsage + " ok: " + ok);
+
+        if (!ok) {
+            exchange.getResponse().setStatusCode(HttpStatus.TOO_MANY_REQUESTS);
+            return exchange.getResponse().setComplete();
+        } else {
+            return chain.filter(exchange);
+        }
+    }
+
+    @Override
+    public int getOrder() {
+        return 0;
+    }
+
+}
+```
+
+配置 Route
+
+```java
+@Autowired
+private RateLimitByCpuGatewayFilter rateLimitByCpuGatewayFilter;
+
+@Bean
+public RouteLocator customerRouteLocator(RouteLocatorBuilder builder) {
+    // @formatter:off
+    return builder.routes()
+            .route(r -> r.path("/throttle/customer/**")
+                         .filters(f -> f.stripPrefix(2)
+                                        .filter(rateLimitByCpuGatewayFilter))
+                         .uri("lb://CONSUMER")
+                         .order(0)
+                         .id("throttle_customer_service")
+            )
+            .build();
+    // @formatter:on
+}
+```
+
+至于效果嘛，自己试试吧。因为 CPU 的使用率一般波动较大，测试效果还是挺明显的，实际使用就得慎重了。
+
+##### 2.4.2.4、改进与提升
+
+实际项目中，除以上实现的限流方式，还可能会：一、在上文的基础上，增加配置项，控制每个路由的限流指标，并实现动态刷新，从而实现更加灵活的管理。二、实现不同维度的限流，例如：
+
+- 对请求的目标 URL 进行限流（例如：某个 URL 每分钟只允许调用多少次）
+- 对客户端的访问 IP 进行限流（例如：某个 IP 每分钟只允许请求多少次）
+- 对某些特定用户或者用户组进行限流（例如：非 VIP 用户限制每分钟只允许调用 100 次某个 API 等）
+- 多维度混合的限流。此时，就需要实现一些限流规则的编排机制（与、或、非等关系）
+
+##### 2.4.2.5、自定义限流
+
+http://cmsblogs.com/?p=12963
+
+**在自定义的路由中实现限流**
+
+
+
+### 2.5、路由熔断 Hystrix
+
+在前面学习`Hystrix`的时候，我们知道`Hystrix`有服务降级的能力，即如果服务调用出现了异常，则执行指定的`fallback`方法。Spring Cloud Gateway也融合了`hystrix`，可以为我们听路由层面的服务降级（**在流量过大时进行服务降级**）。
+
+**在之前 gateway 工程的基础上引入 Hystrix 依赖**
+
+```xml
+<dependency>
+    <groupId>org.springframework.cloud</groupId>
+    <artifactId>spring-cloud-starter-netflix-hystrix</artifactId>
+</dependency>
+```
+
+**配置文件添加 Filter**
+
+```yml
+spring:
+  cloud:
+    gateway:
+      discovery:
+        locator:
+          enabled: true # spring cloud gateway与eureka组合使用。
+      routes:
+        - id: gateway-service-0
+          uri: lb://EUREKA-CONSUMER   # uri
+          predicates:
+            - Method=GET
+            - Path=/customer/**
+          filters:
+            - StripPrefix=1
+            - name: RequestRateLimiter
+              args:
+                # 用于限流的键的解析器的Bean对象名称。它使用 SpEL 表达式根据#{@beanName}从 Spring 容器中获取 Bean 对象。
+                key-resolver: '#{@uriKeyResolver}'
+                # 令牌桶每秒填充的平均速率。
+                redis-rate-limiter.replenishRate: 1
+                # 令牌桶的最大容量数
+                redis-rate-limiter.burstCapacity: 5
+            - name: Hystrix
+              args:
+                name: fallbackcmd
+                fallbackUri: forward:/fallback
+```
+
+Hystrix 支持两个参数：
+
+- name：即 `HystrixCommand` 的名字
+- fallbackUri：即 fallback 对应的 uri，这里的 uri 仅支持 `forward:` schemed 的
+
+最后在 gateway 的项目中创建一个 endpoint：`/fallback`
+
+```java
+@RestController
+public class FallbackController {
+
+    @GetMapping("/fallback")
+    public String fallback() {
+        return "Hello World!\nfrom gateway";
+    }
+
+}
+```
+
+仅做以上配置就 OK 了，如果需要更强大的功能，可以参考 `HystrixGatewayFilterFactory` 进行自定义。
+
+**在自定义路由中实现熔断**
+
+```java
+ 		@Bean
+        public RouteLocator myRoutes(RouteLocatorBuilder builder) {
+            String httpUri = "http://httpbin.org:80";
+            return builder.routes()
+                .route(p -> p
+                    .path("/get")
+                    .filters(f -> f.addRequestHeader("Hello", "World"))
+                    .uri(httpUri))
+                .route(p -> p
+                    .host("*.hystrix.com")
+                    .filters(f -> f
+                        .hystrix(config -> config
+                            .setName("mycmd")
+                            .setFallbackUri("forward:/fallback")))
+                    .uri(httpUri))
+                .build();
+        }
+```
+
+在上面的代码中，我们使用了另外一个router，该router使用host去断言请求是否进入该路由，当请求的host有“*.hystrix.com”，都会进入该router，该router中有一个hystrix的filter,该filter可以配置名称、和指向性fallback的逻辑的地址，比如本案例中重定向到了“/fallback”。
+
+### 2.6、路由重试
+
+重试，我相信大家并不陌生。在我们调用Http接口的时候，总会因为某种原因调用失败，这个时候我们可以通过重试的方式，来重新请求接口。
+
+生活中这样的事例很多，比如打电话，对方正在通话中啊，信号不好啊等等原因，你总会打不通，当你第一次没打通之后，你会打第二次，第三次…第四次就通了。
+
+> 重试也要注意应用场景，读数据的接口比较适合重试的场景，写数据的接口就需要注意接口的幂等性了。还有就是重试次数如果太多的话会导致请求量加倍，给后端造成更大的压力，设置合理的重试机制才是最关键的。
+
+#### 2.6.1、使用讲解
+
+`RetryGatewayFilter`是Spring Cloud Gateway对请求重试提供的一个GatewayFilter Factory。
+
+配置方式：
+
+```yml
+  spring:
+      cloud:
+        gateway:
+          routes:
+          - id: fsh-house
+            uri: lb://fsh-house
+            predicates:
+            - Path=/house/**
+            filters:
+            - name: Retry
+              args:
+               retries: 3
+               series:
+                - SERVER_ERROR
+               statuses:
+                - OK
+               methods:
+                - GET
+                - POST
+               exceptions:
+                - java.io.IOException
+```
+
+`RetryGatewayFilterFactory` 通过这五个参数来控制重试机制：retries、series、statuses、methods、exceptions；
+
+- `retries`：重试次数，默认值是3次。
+- `series`：状态码配置（分段），符合的某段状态码才会进行重试逻辑，默认值是`SERVER_ERROR`，值是5，也就是5XX(5开头的状态码)；取值参考：`org.springframework.http.HttpStatus.Series`。
+- `statuses`：状态码配置，和series不同的是这边是具体状态码的配置，取值请参考：`org.springframework.http.HttpStatus`。
+- `methods`：指定哪些方法的请求需要进行重试逻辑，默认值是 GET 方法，取值参考：`org.springframework.http.HttpMethod`。
+- `exceptions`：指定哪些异常需要进行重试逻辑，默认值是`java.io.IOException`、`org.springframework.cloud.gateway.support.TimeOutException`。
+
+#### 2.6.2、配置讲解
+
+配置类源码`org.springframework.cloud.gateway.filter.factory.RetryGatewayFilterFactory.RetryConfig`：
+
+```java
+    public static class RetryConfig {
+        private int retries = 3;
+
+        private List<Series> series = toList(Series.SERVER_ERROR);
+
+        private List<HttpStatus> statuses = new ArrayList<>();
+
+        private List<HttpMethod> methods = toList(HttpMethod.GET);
+
+        private List<Class<? extends Throwable>> exceptions = toList(IOException.class,
+				TimeoutException.class);
+
+        // .....
+    }
+```
+
+- retries：重试次数，默认值是3次
+- series：状态码配置（分段），符合的某段状态码才会进行重试逻辑，默认值是SERVER_ERROR，值是5，也就是5XX(5开头的状态码)，共有5个值：
+
+```java
+    public enum Series {
+        INFORMATIONAL(1),
+        SUCCESSFUL(2),
+        REDIRECTION(3),
+        CLIENT_ERROR(4),
+        SERVER_ERROR(5);
+    }
+```
+
+- statuses：状态码配置，和series不同的是这边是具体状态码的配置，取值请参考：org.springframework.http.HttpStatus
+- methods：指定哪些方法的请求需要进行重试逻辑，默认值是GET方法，取值如下：
+
+```java
+    public enum HttpMethod {
+        GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS, TRACE;
+    }
+```
+
+- exceptions：指定哪些异常需要进行重试逻辑，默认值是java.io.IOException、org.springframework.cloud.gateway.support.TimeOutException。
+
+#### 2.6.3、代码测试
+
+就写个接口，在接口中记录请求次数，然后抛出一个异常模拟500，通过网关访问这个接口，如果你配置了重试次数是3，那么接口中会输出4次结果才是对的，证明重试生效了。
+
+```java
+    AtomicInteger ac = new AtomicInteger();
+
+    @GetMapping("/data")
+    public HouseInfo getData(@RequestParam("name") String name) {
+        if (StringUtils.isBlank(name)) {
+            throw new RuntimeException("error");
+        }
+        System.err.println(ac.addAndGet(1));
+        return new HouseInfo(1L, "上海", "虹口", "XX小区");
+    }
+```
+
+## 3、高可用
+
+![img](img/006tKfTcly1fr7bgadtl9j31kw1go0xv.jpg)
+
+我们实际使用 Spring Cloud Gateway 的方式如上图，不同的客户端使用不同的负载将请求分发到后端的 Gateway，Gateway 再通过 Eureka 调用后端服务，最后对外输出。因此为了保证 Gateway 的高可用性，前端可以同时启动多个 Gateway 实例进行负载，在 Gateway 的前端使用 Nginx 或者 F5 进行负载转发以达到高可用性。
 
 
 
@@ -2322,6 +4593,19 @@ curl -X POST http://localhost:12000/actuator/bus-refresh
 
 
 
+
+
+
+
+
+
+# 四、分布式链路跟踪 Sleuth 与 Zipkin
+
+[分布式链路跟踪 Sleuth 与 Zipkin](https://windmt.com/2018/04/24/spring-cloud-12-sleuth-zipkin/)
+
+[使用Spring Cloud Sleuth和Zipkin进行分布式链路跟踪](https://www.geekdigging.com/2019/08/31/3982751733/)
+
+[[服务链路追踪(Spring Cloud Sleuth)](http://cmsblogs.com/?p=5547)](http://cmsblogs.com/?p=5547)
 
 
 
