@@ -95,7 +95,7 @@ Dubbo 是阿里开源的一个 `SOA` 服务治理解决方案，文档丰富，�
 
 其实把 `Spring Cloud` 和 `Dubbo` 放一起对比有点不公平，`Dubbo` 只是实现了服务治理，而 `Spring Cloud` 下面有 23 个子项目（截止到 2018.4）分别覆盖了微服务架构下的方方面面，服务治理只是其中的一个方面，一定程度来说，**`Dubbo` 只是 `Spring Cloud Netflix` 中的一个子集**。但是在选择框架上，方案完整度恰恰是一个需要重点关注的内容。
 
-| Dubbo        | Spring Cloud  |                              |
+|              | Dubbo         | Spring Cloud                 |
 | :----------- | :------------ | ---------------------------- |
 | 服务注册中心 | Zookeeper     | Spring Cloud Netflix Eureka  |
 | 服务调用方式 | RPC           | REST API                     |

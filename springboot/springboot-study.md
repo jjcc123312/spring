@@ -1774,7 +1774,7 @@ public class DruidConfig {
   - 产生共享锁的sql：`select * from ad_plan lock in share mode;`
 - **排他锁（Exclusive Lock，也叫X锁）**：又称写锁。如果一个事务对象加了排他锁，**其他事务就不能再给它加任何锁了**。(某个顾客把试衣间从里面反锁了，其他顾客想要使用这个试衣间，就只有等待锁从里面给打开了)
   - 允许获取排他锁的事务更新数据，阻止其他事务取得相同的数据集共享读锁和排他写锁。若事务T对数据对象A加上X锁，事务T可以读A也可以修改A，其他事务不能再对A加任何锁，直到T释放A上的锁。
-  - mysql InnoDB引擎默认的修改数据语句：**update,delete,insert都会自动给涉及到的数据加上排他锁，select语句默认不会加任何锁类型加过排他锁的数据行在其他事务种是不能修改数据的，也不能通过for update和lock in share mode锁的方式查询数据，但可以直接通过select …from…查询数据，因为普通查询没有任何锁机制。**
+  - mysql InnoDB引擎默认的修改数据语句：**update,delete,insert都会自动给涉及到的数据加上排他锁，select语句默认不会加任何锁类型，加过排他锁的数据行在其他事务种是不能修改数据的，也不能通过for update和lock in share mode锁的方式查询数据，但可以直接通过select …from…查询数据，因为普通查询没有任何锁机制。**
   - 产生排他锁的sql： `select * from ad_plan for update;`
 
 ### 6.3 事务传播行为
@@ -2245,6 +2245,53 @@ AOP 编程思想面对的是横向的切面，而非纵向的业务。举个简�
 #### 3. 拦截器的实现
 
 以上的过滤器、监听器都属于Servlet的api，我们在开发中处理利用以上的进行过滤web请求时，还可以使用Spring提供的拦截器(HandlerInterceptor)进行更加精细的控制。
+
+**源码：**
+
+```java
+// HandlerInterceptor.java
+
+/**
+ * 拦截处理器，在 {@link HandlerAdapter#handle(HttpServletRequest, HttpServletResponse, Object)} 执行之前
+ */
+default boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler)
+		throws Exception {
+	return true;
+}
+
+/**
+ * 拦截处理器，在 {@link HandlerAdapter#handle(HttpServletRequest, HttpServletResponse, Object)} 执行成功之后
+ */
+default void postHandle(HttpServletRequest request, HttpServletResponse response, Object handler,
+		@Nullable ModelAndView modelAndView) throws Exception {
+}
+
+/**
+ * 拦截处理器，在 {@link HandlerAdapter#handle(HttpServletRequest, HttpServletResponse, Object)} 执行完之后，无论成功还是失败
+ *
+ * 并且，只有该处理器 {@link #preHandle(HttpServletRequest, HttpServletResponse, Object)} 执行成功之后，才会被执行
+ */
+default void afterCompletion(HttpServletRequest request, HttpServletResponse response, Object handler,
+		@Nullable Exception ex) throws Exception {
+}
+
+```
+
+- 一共有三个方法，分别为：
+  - `#preHandle(...)` 方法，调用 Controller 方法之**前**执行。
+  - `#postHandle(...)` 方法，调用 Controller 方法之**后**执行。
+  - `#afterCompletion(...)`方法，处理完 Controller 方法返回结果之后执行。
+    - 例如，页面渲染后。
+    - **当然，要注意，无论调用 Controller 方法是否成功，都会执行**。
+- 举个例子：
+  - 当俩个拦截器都实现放行操作时，执行顺序为 `preHandle[1] => preHandle[2] => postHandle[2] => postHandle[1] => afterCompletion[2] => afterCompletion[1]` 。
+  - 当第一个拦截器 `#preHandle(...)` 方法返回 `false` ，也就是对其进行拦截时，第二个拦截器是完全不执行的，第一个拦截器只执行 `#preHandle(...)` 部分。
+  - 当第一个拦截器 `#preHandle(...)` 方法返回 `true` ，第二个拦截器 `#preHandle(...)` 返回 `false` ，执行顺序为 `preHandle[1] => preHandle[2] => afterCompletion[1]` 。
+- 总结来说：
+  - `#preHandle(...)` 方法，按拦截器定义**顺序**调用。若任一拦截器返回 `false` ，则 Controller 方法不再调用。
+  - `#postHandle(...)` 和 `#afterCompletion(...)` 方法，按拦截器定义**逆序**调用。
+  - `#postHandler(...)` 方法，在调用 Controller 方法之**后**执行。
+  - `#afterCompletion(...)` 方法，只有该拦截器在 `#preHandle(...)` 方法返回 `true` 时，才能够被调用，且一定会被调用。为什么“且一定会被调用”呢？即使 `#afterCompletion(...)` 方法，按拦截器定义**逆序**调用时，前面的拦截器发生异常，后面的拦截器还能够调用，**即无视异常**。
 
 **编写自定义拦截器类**
 
@@ -4187,6 +4234,14 @@ public class Jackson2JsonRedisSerializer<T> implements RedisSerializer<T> {
 @AutoConfigureAfter(RedisAutoConfiguration.class)
 public class RedisConfiguration {
 
+    /**
+     * 设置redis存储数据的序列化方式
+     * @title redisTemplate
+     * @author Jjcc
+     * @param redisConnectionFactory redis连接工厂
+     * @return org.springframework.data.redis.core.RedisTemplate<java.lang.String,java.lang.Object>
+     * @createTime 2019/11/12 20:48
+     */
     @Bean
     public RedisTemplate<String, Object> redisTemplate(RedisConnectionFactory redisConnectionFactory) {
         // 创建 RedisTemplate 对象
@@ -4201,6 +4256,10 @@ public class RedisConfiguration {
         //允许更改底层VisibilityCheckers的配置，以更改自动检测的属性类型的详细信息
         objectMapper.setVisibility(PropertyAccessor.ALL, JsonAutoDetect.Visibility.ANY);
         objectMapper.enableDefaultTyping(ObjectMapper.DefaultTyping.NON_FINAL);
+        // 反序列化时出现 Could not read JSON: Unrecognized field "enabled" 问题的解决方法
+        objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        // Redis序列化 Java8的时间Instant、LocalDateTime、LocalDate所需配置
+        objectMapper.registerModules(new ParameterNamesModule(), new Jdk8Module(), new JavaTimeModule());
 
         //设置JACKSON2序列化策略对象
         jackson2JsonRedisSerializer.setObjectMapper(objectMapper);
@@ -4218,6 +4277,56 @@ public class RedisConfiguration {
     }
 }
 ```
+
+##### 注意
+
+> **使用 `Jackson2JsonRedisSerializer` 序列化 Value时，出现的几种问题。**
+
+**redis序列化`java8 Instant、LocalDateTime、LocalDate`错误的问题**
+
+所序列化的POJO对象中，存在 java8的时间对象 `Instant、LocalDateTime、LocalDate`时，会存在 **org.springframework.data.redis.serializer.SerializationException: `Could not read JSON: Can not construct instance of java.time.LocalDateTime no suitable constructor found, can not deserialize from Object value (missing default constructor or creator, or perhaps need to add/enable type information?)`:**异常。
+
+解决方法：
+
+1. 指定`LocalDateTime`这样的序列化以及反序列化器：
+   `@JsonDeserialize(using = LocalDateTimeDeserializer.class)`
+   `@JsonSerialize(using = LocalDateTimeSerializer.class)`
+
+2. 在 配置 `Redis`的序列化配置，添加配置：
+
+   ```java
+   ObjectMapper objectMapper = new ObjectMapper();
+   // Redis序列化 Java8的时间Instant、LocalDateTime、LocalDate所需配置
+   objectMapper.registerModules(new ParameterNamesModule(), new Jdk8Module(), new JavaTimeModule());
+   ```
+
+https://blog.csdn.net/m0_37589586/article/details/87782001
+
+https://blog.csdn.net/wwrzyy/article/details/90232835
+
+https://www.jianshu.com/p/d45b2bd7f92a
+
+**redis反序列化 Jackson2JsonRedisSerializer报错`Could not read JSON: Unrecognized field`...**
+
+json序列化时，**不仅是根据get方法来序列化的，而是实体类中所有的有返回值的方法都会将返回的值序列化**，但是反序列化时是根据set方法来实现的，所以**当实体类中有非get，set方法的方法有返回值时，反序列化时就会出错**。
+
+解决方法：
+
+1. `RedisTemplate`的设置里，添加配置：
+
+   ```java
+   ObjectMapper om = new ObjectMapper();
+   // 反序列化时出现 Could not read JSON: Unrecognized field "enabled" 问题的解决方法
+   objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+   ```
+
+2. 在出现问题的 `set` 方法上加上注解：
+
+   `@JSonIgnore`
+
+https://blog.csdn.net/baidu_29092471/article/details/55194363
+
+https://blog.csdn.net/ChuXinstyle/article/details/101271729
 
 ### 12.3 使用Redis Repository操作数据
 
