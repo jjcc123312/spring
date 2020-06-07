@@ -3240,6 +3240,697 @@ public class SessionController {
 
 [SpringBoot集成Spring Security（10）——角色继承](https://blog.csdn.net/yuanlaijike/article/details/101565313)
 
+# 三、JWT 模式
+
+## 1、详述JWT使用场景及结构安全
+
+### 1.1、基于Session应用开发的缺陷
+
+在我们传统的B\S应用开发方式中，都是使用`session`进行状态管理的，比如说：保存登录、用户、权限等状态信息。这种方式的原理大致如下：
+
+![img](img/fe5186953a7a140844dee5dcb6cebf6e_1200x473.png)
+
+- 用户登陆之后，将状态信息保存到session里面。服务端自动维护sessionid，即将sessionid写入cookie。
+- cookie随着HTTP响应，被自动保存到浏览器端。
+- 当用户再次发送HTTP请求，sessionid随着cookies被带回服务器端
+- 服务器端根据sessionid，可以找回该用户之前保存在session里面的数据。
+
+当然，这整个过程中，`cookies`和`sessionid`都是服务端和浏览器端自动维护的。所以从编码层面是感知不到的，程序员只能感知到`session`数据的存取。但是，这种方式在有些情况下，是不适用的。
+
+- 比如：**非浏览器的客户端、手机移动端等等，因为他们没有浏览器自动维护cookies的功能**。
+- 比如：集群应用，同一个应用部署甲、乙、丙三个主机上，实现负载均衡应用，其中一个挂掉了其他的还能负载工作。要知道session是保存在服务器内存里面的，三个主机一定是不同的内存。那么你登录的时候访问甲，而获取接口数据的时候访问乙，就无法保证session的唯一性和共享性。
+
+当然以上的这些情况我们都有方案(如redis共享session等)，可以继续使用session来保存状态。但是还有另外一种做法就是不用session了，即开发一个无状态的应用，JWT就是这样的一种方案。
+
+### 1.2、JWT 是什么
+
+笔者不想用比较高大上的名词解释JWT（`JSON web tokens`），你**可以认为JWT是一个加密后的接口访问密码，并且该密码里面包含用户名信息**。这样既可以知道你是谁？又可以知道你是否可以访问应用？
+
+![img](img/35eacfa907ea0d625bc36ff198e290d8_809x525.png)
+
+- 首先，客户端需要向服务端申请JWT令牌，这个过程通常是登录功能。即：由用户名和密码换取JWT令牌。
+- 当你访问系统其他的接口时，在HTTP的header中携带JWT令牌。header的名称可以自定义，前后端对应上即可。
+- 服务端解签验证JWT中的用户标识，根据用户标识从数据库中加载访问权限、用户信息等状态信息。
+
+这就是JWT，以及JWT在应用服务开发中的使用方法。
+
+### 1.3、JWT结构分析
+
+下图是我用在线的JWT解码工具，解码时候的截图。注意我这里用的是解码，不是解密。
+
+![img](img/15b76e670c51539f5aecaa1e847502d1_692x257.png)
+
+从图中，我们可以看到JWT分为三个部分：
+
+- `Header`，这个部分通常是用来说明JWT使用的算法信息
+- `payload`，这个部分通常用于携带一些自定义的状态附加信息（重要的是用户标识）。但是注意这部分是可以明文解码的，所以注意是用户标识，而不应该是用户名或者其他用户信息。
+- `signature`，这部分是对前两部分数据的签名，防止前两部分数据被篡改。这里需要指定一个密钥`secret`，进行签名和解签。
+
+### 1.4、JWT安全么
+
+很多的朋友看到上面的这个解码文件，就会生出一个疑问？你都把JWT给解析了，而且JWT又这么的被大家广泛熟知，它还安全么？我用一个简单的道理说明一下：
+
+- JWT就像是一把钥匙，用来开你家里的锁。用户把钥匙一旦丢了，家自然是不安全的。其实和使用session管理状态是一样的，一旦网络或浏览器被劫持了，肯定不安全。
+- **`signature`通常被叫做签名，而不是密码**。比如：天王盖地虎是签名，宝塔镇河妖就被用来解签。字你全都认识，但是暗号只有知道的人才对得上。当然JWT中的暗号`secret`不会设计的像诗词一样简单。
+- JWT服务端也保存了一把钥匙，就是**暗号`secret`。用来数据的签名和解签**，secret一旦丢失，所有用户都是不安全的。所以对于IT人员，更重要的是保护secret的安全。
+
+如何加强JWT的安全性？
+
+- 避免网络劫持，因为使用HTTP的header传递JWT，所以使用HTTPS传输更加安全。这样在网络层面避免了JWT的泄露。
+- secret是存放在服务器端的，所以只要应用服务器不被攻破，理论上JWT是安全的。因此要保证服务器的安全。
+- 那么有没有JWT加密算法被攻破的可能？当然有。但是对于JWT常用的算法要想攻破，目前已知的方法只能是暴力破解，白话说就是"试密码"。所以要定期更换secret并且保正secret的复杂度，等破解结果出来了，你的secret已经换了。
+
+话说回来，如果你的服务器、或者你团队的内部人员出现漏洞，同样没有一种协议和算法是安全的。
+
+## 2、Spring Security-JWT实现原理
+
+### 2.1、JWT的认证及鉴权流程
+
+![img](img/35eacfa907ea0d625bc36ff198e290d8_809x525-1585912490379.png)
+
+其认证与鉴权流程浓缩为以下两句话
+
+- 认证：使用可信用户信息（用户名密码、短信登录）换取带有签名的JWT令牌
+- 鉴权：解签JWT令牌，校验用户权限。具有某个接口访问权限，开放该接口访问。
+
+### 2.2、JWT结合Spring Security认证细节说明
+
+#### 2.2.1、认证细节流程
+
+![img](img/0d6bc888ca587f21b57715c3edb5bd88_1326x555.png)
+
+- 当客户端发送“/authentication”请求的时候，实际上是请求`JwtAuthenticationController`。该`Controller`的功能是：一是用户登录功能的实现，二是如果登录成功，生成JWT令牌。在使用JWT的情况下，这个类需要我们自己来实现。
+- 具体到用户登录，就需要结合Spring Security实现。通过向Spring Security提供的`AuthenticationManager`的`authenticate()`方法传递用户名密码，由spring Security帮我们实现用户登录认证功能。
+- 如果**登陆成功**，我们就要**为该用户生成JWT令牌了**。通常此时我们需要使用`UserDetailsService`的`loadUserByUsername`方法加载用户信息，然后根据信息生成JWT令牌，JWT令牌生成之后返回给客户端。
+- 另外，我们需要写一个工具类JwtTokenUtil，该工具类的主要功能就是根据用户信息生成JWT，解签JWT获取用户信息，校验令牌是否过期，刷新令牌等。
+
+#### 2.2.2、接口鉴权细节
+
+当客户端获取到JWT之后，他就可以使用JWT请求接口资源服务了。大家可以看到在“授权流程细节”的时序图中，有一个Filter过滤器我们没有讲到，其实它和授权认证的流程关系不大，它是用来进行接口鉴权的。因为授权认证就只有一个接口即可，但是服务资源接口却有很多，所以我**们不可能在每一个`Controller`方法中都进行鉴权，所以在到达`Controller`之前通过`Filter`过滤器进行JWT解签和权限校验**。
+
+![img](img/9ce9238fa54ec837f8cddfa16da0a7b4_1639x807.png)
+
+假如我们有一个接口资源“/hello”定义在`HelloWorldcontroller`中，鉴权流程是如何进行的？请结合上图进行理解：
+
+- 当客户端请求“/hello”资源的时候，他应该在HTTP请求的Header带上JWT字符串。Header的名称前后端服务自己定义，但是要统一。
+- 服务端需要自定义JwtRequestFilter，拦截HTTP请求，并判断请求Header中是否有JWT令牌。如果没有，就执行后续的过滤器。因为Spring Security是有完成的鉴权体系的，你没赋权该请求就是非法的，后续的过滤器链会将该请求拦截，最终返回无权限访问的结果。
+- 如果在HTTP中解析到JWT令牌，就调用JwtTokenUtil对令牌的有效期及合法性进行判定。如果是伪造的或者过期的，同样返回无权限访问的结果。
+- 如果JWT令牌在有效期内并且校验通过，我们仍然要通过UserDetailsService加载该用户的权限信息，并将这些信息交给Spring Security。只有这样，该请求才能顺利通过Spring Security一系列过滤器的关卡，顺利到达HelloWorldcontroller并访问“/hello”接口。
+
+#### 2.2.3、其他的细节问题
+
+- 一旦发现用户的JWT令牌被劫持，或者被个人泄露该怎么办？**JWT令牌有一个缺点就是一旦发放，在有效期内都是可用的，那怎么回收令牌？我们可以通过设置黑名单ip、用户，或者为每一个用户JWT令牌使用一个secret密钥，可以通过修改secret密钥让该用户的JWT令牌失效**。
+- 如何刷新令牌？为了提高安全性，我们的令牌有效期通常时间不会太长。那么，我们不希望用户正在使用app的时候令牌过期了，用户必须重新登陆，很影响用户体验。这怎么办？这就**需要在客户端根据业务选择合适的时机或者定时的刷新JWT令牌。所谓的刷新令牌就是用有效期内，用旧的合法的JWT换取新的JWT**。
+
+## 3、编码实现JWT认证鉴权
+
+通过Spring Security实现`JWT`认证，有两种方式，一种是Spring Security禁止 `formLogin`，自己实现登录验证`Controller`；一种是通过Spring Security的 `formLogin`，即Spring Security的过滤器实现登录。
+
+### 3.1、自定义Controller实现JWT
+
+源码地址：https://github.com/jjcc123312/Spring-Security-study/tree/master/spring-security-jwt-study
+
+#### 3.1.1、环境准备工作
+
+- 建立Spring Boot项目并集成了Spring Security，项目可以正常启动
+- 通过controller写一个HTTP的GET方法服务接口，比如：“/hello”
+- 实现最基本的动态数据验证及权限分配，即实现`UserDetailsService`接口和`UserDetails`接口。这两个接口都是向Spring Security提供用户、角色、权限等校验信息的接口
+- 将`HttpSecurity`配置中的`formLogin()`配置段全部去掉。因为JWT完全使用JSON接口，没有from表单提交。
+- HttpSecurity配置中一定要加上`csrf().disable()`，即暂时关掉跨站攻击CSRF的防御。这样是不安全的，我们后续章节再做处理。
+
+![image-20200405233448947](img/image-20200405233448947.png)
+
+#### 3.1.2、开发JWT工具类
+
+通过maven坐标引入JWT工具包jjwt。**实际生产中，不会引入jjwt，而是直接使用`redis`**。
+
+```xml
+<dependency>
+    <groupId>io.jsonwebtoken</groupId>
+    <artifactId>jjwt</artifactId>
+    <version>0.9.0</version>
+</dependency>
+```
+
+在application.yml中加入如下自定义一些关于JWT的配置
+
+```yml
+jwt: 
+  header: JWTHeaderName
+  secret: aabbccdd  
+  expiration: 3600000   
+```
+
+- 其中**`header`是携带JWT令牌的HTTP的`Header`的名称**。虽然我这里叫做JWTHeaderName，但是在实际生产中可读性越差越安全。
+- **`secret`是用来为JWT基础信息加密和解密的密钥**。虽然我在这里在配置文件写死了，但是在实际生产中通常不直接写在配置文件里面。而是通过应用的启动参数传递，并且需要定期修改。
+- `expiration`是JWT令牌的有效时间。
+
+写一个JWT令牌工具类。
+
+```java
+@Data
+@Component
+@ConfigurationProperties(prefix = "jwt")
+public class JwtTokenUtil {
+
+    /**
+     * http请求体体重header中的name
+     */
+    private String header;
+
+    /**
+     * jwt的基础信息加密和解密的密匙
+     */
+    private String secret;
+
+    /**
+     * 令牌存活时间
+     */
+    private Long expiration;
+
+
+    /**
+     * 生成令牌
+     * @title generatedToken
+     * @author Jjcc
+     * @param userDetails 用户信息对象的父类
+     * @return java.lang.String
+     * @createTime 2020/4/3 20:57
+     */
+    String generatedToken(UserDetails userDetails) {
+        Map<String, Object> claims = new HashMap<>(2);
+        claims.put("sub", userDetails.getUsername());
+        claims.put("create", new Date());
+        return generatedToken(claims);
+    }
+
+    /**
+     * 通过 claims 生成令牌
+     * @title generatedToken
+     * @author Jjcc
+     * @param claims 数据声明
+     * @return java.lang.String
+     * @createTime 2020/4/3 20:58
+     */
+    private String generatedToken(Map<String, Object> claims) {
+        // 令牌过期时间
+        Date date = new Date(System.currentTimeMillis() + expiration);
+
+        return Jwts.builder().setClaims(claims)
+                // 过期时间
+                .setExpiration(date)
+                // 不使用公匙，私匙
+                .signWith(SignatureAlgorithm.HS512, secret)
+                .compact();
+    }
+
+    /**
+     * 从令牌中获取用户名
+     * @title getUsernameFromToken
+     * @author Jjcc
+     * @param token 令牌
+     * @return java.lang.String
+     * @createTime 2020/4/3 21:11
+     */
+    String getUsernameFromToken(String token) {
+        String username;
+        try {
+            Claims claimsFromToken = getClaimsFromToken(token);
+            username = claimsFromToken.getSubject();
+        } catch (Exception e) {
+            username = null;
+        }
+
+        return username;
+    }
+
+    /**
+     * 从令牌中获取数据声明
+     * @param token 令牌
+     * @return 数据声明
+     */
+    private Claims getClaimsFromToken(String token) {
+        Claims claims;
+        try {
+            claims = Jwts.parser().setSigningKey(secret).parseClaimsJws(token).getBody();
+        } catch (Exception e) {
+            claims = null;
+        }
+        return claims;
+    }
+
+    /**
+     * 令牌是否过期
+     * @title isTokenExpired
+     * @author Jjcc
+     * @param token 令牌
+     * @return java.lang.Boolean true：token过期了；false：没过期
+     * @createTime 2020/4/3 21:15
+     */
+    Boolean isTokenExpired(String token) {
+        try {
+            Claims claimsFromToken = getClaimsFromToken(token);
+            Date expiration = claimsFromToken.getExpiration();
+            return expiration.before(new Date());
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /**
+     * 刷新令牌
+     * @title refreshToken
+     * @author Jjcc
+     * @param token 令牌
+     * @return java.lang.String
+     * @createTime 2020/4/3 23:21
+     */
+    String refreshToken(String token){
+        String refreshToken;
+        try {
+            Claims claimsFromToken = getClaimsFromToken(token);
+            claimsFromToken.put("create", new Date());
+            refreshToken = generatedToken(claimsFromToken);
+        } catch (Exception e) {
+            refreshToken = null;
+        }
+        return refreshToken;
+    }
+
+    /**
+     * 验证令牌是否相同以及是否过期
+     * @title validateToken
+     * @author Jjcc
+     * @param token 令牌
+     * @param userDetails 用户信息
+     * @return java.lang.Boolean
+     * @createTime 2020/4/3 23:29
+     */
+    public Boolean validateToken(String token, UserDetails userDetails) {
+        String username = getUsernameFromToken(token);
+        return username.equals(userDetails.getUsername()) && !isTokenExpired(token);
+    }
+
+
+}
+```
+
+上面的代码就是使用io.jsonwebtoken.jjwt提供的方法开发JWT令牌生成、刷新的工具类。
+
+#### 3.1.3、登录验证接口（获取Token的接口）
+
+- `/login`接口用于登录验证，并且生成JWT返回给客户端
+- `/refreshtoken`接口用于刷新JWT，更新JWT令牌的有效期
+- 两个访问接口都需要在 httpSecurity中设置放行，即 `permitAll()`
+
+```java
+@RestController
+public class JwtAuthController {
+
+    private JwtAuthService jwtAuthService;
+
+
+
+    @Autowired
+    public JwtAuthController(JwtAuthService jwtAuthService) {
+        this.jwtAuthService = jwtAuthService;
+    }
+
+    /**
+     * 登录认证
+     * @title login
+     * @author Jjcc
+     * @param username 参数容器
+     * @param password 参数容器
+     * @return com.security.springsecuritystudy.config.exception.AjaxResponse
+     * @createTime 2020/4/4 13:53
+     */
+    @PostMapping("/login")
+    public AjaxResponse login(String username, String password) {
+        if (StringUtils.isEmpty(username) || StringUtils.isEmpty(password)) {
+            return AjaxResponse.error(
+                    new CustomException(
+                            CustomExceptionType.USER_INPUT_ERROR,"用户名密码不能为空"));
+        }
+
+        HashMap<String, String> map = new HashMap<>(2);
+        String token = jwtAuthService.login(username, password);
+        map.put("headerName", jwtAuthService.getHedaerName());
+        map.put("token", token);
+        map.put("url", "/index");
+
+        return AjaxResponse.loginSuccess(map);
+    }
+
+    /**
+     * 刷新令牌
+     * @title refresh
+     * @author Jjcc
+     * @param token token
+     * @return com.security.springsecuritystudy.config.exception.AjaxResponse
+     * @createTime 2020/4/4 13:53
+     */
+    @PostMapping(value = "/refreshToken")
+    public AjaxResponse refresh(@RequestHeader("${jwt.header}") String token) {
+        return AjaxResponse.success(jwtAuthService.refreshToken(token));
+    }
+}
+```
+
+ 核心的token业务逻辑写在`JwtAuthService` 中
+
+- login方法中首先使用用户名、密码进行登录验证（通过用户、密码创建一个没有认证的 `UsernamePasswordAuthenticationToken`，然后交给 `authenticationManager`处理）。如果验证失败抛出异常。如果验证成功，程序继续向下走，生成JWT响应给前端
+- refreshToken方法只有在JWT token没有过期的情况下才能刷新，过期了就不能刷新了。需要重新登录。
+
+```java
+@Service
+public class JwtAuthService {
+    private AuthenticationManager authenticationManager;
+
+
+    private JwtTokenUtil jwtTokenUtil;
+
+    @Autowired
+    public JwtAuthService(AuthenticationManager authenticationManager,
+                          JwtTokenUtil jwtTokenUtil) {
+        this.authenticationManager = authenticationManager;
+        this.jwtTokenUtil = jwtTokenUtil;
+    }
+
+    /**
+     * 登录认证
+     * @title login
+     * @author Jjcc
+     * @param username 账号
+     * @param password 密码
+     * @return java.lang.String
+     * @createTime 2020/4/4 13:48
+     */
+    String login(String username, String password) {
+        // 创建一个没有认证的 token
+        UsernamePasswordAuthenticationToken usernamePasswordAuthenticationToken = new UsernamePasswordAuthenticationToken(username, password);
+
+        // 通过 authenticationManager 找到对应的 provider 进行认证处理；处理
+        Authentication authenticate = authenticationManager.authenticate(usernamePasswordAuthenticationToken);
+        SecurityContextHolder.getContext().setAuthentication(authenticate);
+
+        UserDetails principal = (UserDetails) authenticate.getPrincipal();
+
+        //生成JWT
+        return jwtTokenUtil.generatedToken(principal);
+    }
+
+    /**
+     * 获取 headerName
+     * @title getHedaerName
+     * @author Jjcc
+     * @return java.lang.String
+     * @createTime 2020/4/5 16:16
+     */
+    public String getHedaerName() {
+        return jwtTokenUtil.getHeader();
+    }
+
+    /**
+     * 刷新token
+     * @title refreshToken
+     * @author Jjcc
+     * @param oldToken 旧的token
+     * @return java.lang.String
+     * @createTime 2020/4/4 13:48
+     */
+    String refreshToken(String oldToken) {
+        // 先判断当前token是否过期，没过期则刷新令牌
+        if (!jwtTokenUtil.isTokenExpired(oldToken)) {
+            return jwtTokenUtil.refreshToken(oldToken);
+        }
+
+        return null;
+    }
+
+}
+```
+
+因为使用到了`AuthenticationManager` ,所以在继承`WebSecurityConfigurerAdapter`的`SpringSecurity`配置实现类中，将`AuthenticationManager` 声明为一个Bean。
+
+```java
+@Bean(name = BeanIds.AUTHENTICATION_MANAGER)
+@Override
+public AuthenticationManager authenticationManagerBean() throws Exception {
+    return super.authenticationManagerBean();
+}
+```
+
+##### 认证异常处理器
+
+定义一个 处理`AuthenticationException`异常的处理器，用于处理通过 `AuthenticationManager`进行认证时出现的异常，这里交给先前定义的 `MyAuthenticationFailureHandler`来处理异常。
+
+```java
+/**
+ * 全局处理异常类
+ * @author Jjcc
+ * @version 1.0.0
+ * @className WebExceptionHandler.java
+ * @createTime 2019年10月19日 15:35:00
+ */
+@Slf4j
+@ControllerAdvice
+public class WebExceptionHandler {
+
+
+    private MyAuthenticationFailureHandler myAuthenticationFailureHandler;
+
+    @Autowired
+    public WebExceptionHandler(MyAuthenticationFailureHandler myAuthenticationFailureHandler) {
+        this.myAuthenticationFailureHandler = myAuthenticationFailureHandler;
+    }
+
+    /**
+     * 在JwtService中，登录实际是交给 authenticationManager来选择对应的 provider来处理。
+     * 处理过程中，可能出现的各种异常都是 AuthenticationException的子类，这里我将抛出的异常交给
+     * formLog 方式登录所需指定的 认证失败处理器 AuthenticationFailureHandler 进行处理
+     * @title customAuthenticationException
+     * @author Jjcc
+     * @param request 请求体
+     * @param response 响应体
+     * @param e
+     * @return void
+     * @createTime 2020/4/5 23:46
+     */
+    @ExceptionHandler(AuthenticationException.class)
+    public void customAuthenticationException(HttpServletRequest request, HttpServletResponse response,
+                                                      AuthenticationException e) throws IOException, ServletException {
+        log.error("exception--------11>", e);
+        myAuthenticationFailureHandler.onAuthenticationFailure(request, response, e);
+    }
+}
+```
+
+#### 3.1.4、接口访问鉴权过滤器
+
+当用户第一次登陆之后，我们将JWT令牌返回给了客户端，客户端应该将该令牌保存起来。在进行接口请求的时候，将令牌带上，放到HTTP的header里面，header的名字要和jwt.header的配置一致，这样服务端才能解析到。下面我们定义一个拦截器：
+
+- 拦截接口请求，从请求request获取token，从token中解析得到用户名
+- 然后通过UserDetailsService获得系统用户（从数据库、或其他其存储介质）
+- 根据用户信息和JWT令牌，验证系统用户与用户输入的一致性，并判断JWT是否过期。如果没有过期，至此表明了该用户的确是该系统的用户。
+- 但是，你是系统用户不代表你可以访问所有的接口。所以需要构造`UsernamePasswordAuthenticationToken`传递用户、权限信息，并将这些信息通过`authentication`告知Spring Security。Spring Security会以此判断你的接口访问权限。
+
+```java
+/**
+ * jwt令牌鉴权过滤器
+ * @author Jjcc
+ * @version 1.0.0
+ * @className JwtAuthenticationTokenFilter.java
+ * @createTime 2020年04月04日 14:33:00
+ */
+@Component
+public class JwtAuthenticationTokenFilter extends OncePerRequestFilter {
+
+    private MyUserDetailsServiceImpl myUserDetailsService;
+
+    private JwtTokenUtil jwtTokenUtil;
+
+    @Autowired
+    public JwtAuthenticationTokenFilter(MyUserDetailsServiceImpl myUserDetailsService,
+                                        JwtTokenUtil jwtTokenUtil) {
+        this.myUserDetailsService = myUserDetailsService;
+        this.jwtTokenUtil = jwtTokenUtil;
+    }
+
+    @Override
+    protected void doFilterInternal(HttpServletRequest request,
+                                    HttpServletResponse response,
+                                    FilterChain filterChain) throws ServletException, IOException {
+        // 从请求体的header中拿到 jwtToken
+        String headerToken = request.getHeader(jwtTokenUtil.getHeader());
+        if (!StringUtils.isEmpty(headerToken)) {
+            // 通过 jwtToken 拿到用户名
+            String username = jwtTokenUtil.getUsernameFromToken(headerToken);
+            // 判断用户名是否为空以及 判断当前的请求是否拥有 认证主体
+            if (null != username && null == SecurityContextHolder.getContext().getAuthentication()) {
+                UserDetails userDetails = myUserDetailsService.loadUserByUsername(username);
+                // 效验 jwtToken 包含的用户名 与 请求体中的用户名是否一致
+                if (jwtTokenUtil.validateToken(headerToken, userDetails)) {
+                    //给使用该JWT令牌的用户进行授权
+                    UsernamePasswordAuthenticationToken authenticationToken
+                            = new UsernamePasswordAuthenticationToken(userDetails,null,
+                            userDetails.getAuthorities());
+                    // 将获取到的认证主体保存到 context 中
+                    SecurityContextHolder.getContext().setAuthentication(authenticationToken);
+                }
+            }
+
+        }
+
+        filterChain.doFilter(request, response);
+    }
+}
+```
+
+##### 请求未认证时的处理器
+
+当请求体中未包含Token，或者包含的Token不存在时，会执行该处理器。
+
+```java
+/**
+ * 请求未认证 的处理
+ * @author Jjcc
+ */
+@Component
+public class AjaxAuthenticationEntryPoint implements AuthenticationEntryPoint {
+
+    @Override
+    public void commence(HttpServletRequest httpServletRequest, HttpServletResponse httpServletResponse, AuthenticationException e) throws IOException, ServletException {
+
+        ObjectMapper objectMapper = new ObjectMapper();
+
+        httpServletResponse.setContentType("application/json;charset=UTF-8");
+
+        httpServletResponse.getWriter().write(objectMapper.writeValueAsString(
+                AjaxResponse.error(new CustomException(CustomExceptionType.USER_NEED_AUTHORITIES, "未登录"))));
+
+        // 未登录重定向到登录页面
+//        httpServletResponse.sendRedirect("/login.html");
+    }
+}
+```
+
+##### 鉴权失败的处理器
+
+解析Token后，对应的口令权限不足时执行的处理器。
+
+```java
+/**
+ * 鉴权失败异常：认证用户访问无权限资源时的异常
+ * @author Jjcc
+ * @version 1.0.0
+ * @className MyAccessDeniedHandlerImpl.java
+ * @createTime 2020年04月01日 13:43:00
+ */
+@Component
+public class MyAccessDeniedHandlerImpl implements AccessDeniedHandler {
+
+    @Value("${spring.security.loginType}")
+    private String loginType;
+
+    private ObjectMapper objectMapper = new ObjectMapper();
+
+    @Override
+    public void handle(HttpServletRequest request, HttpServletResponse response, AccessDeniedException accessDeniedException) throws IOException, ServletException {
+
+        CustomException customException = new CustomException(CustomExceptionType.AUTHORIZATION_ERROR, "口令权限不足，无法访问");
+
+        // 判断是需要跳转页面还是返回json。
+        String type = "json";
+        if (type.equalsIgnoreCase(loginType)) {
+            response.setContentType("application/json;charset=UTF-8");
+            response.getWriter().write(
+                    objectMapper.writeValueAsString(AjaxResponse.error(customException)
+                    ));
+        } else {
+            // 鉴权失败，跳转到指定的页面
+            response.setContentType("text/html;charset=UTF-8");
+           response.sendRedirect("/error");
+        }
+
+
+    }
+}
+```
+
+#### 3.1.5、Security配置
+
+在spring Security的配置类（即`WebSecurityConfigurerAdapter`实现类的`configure(HttpSecurity http)`配置方法中，加入如下配置：
+
+```java
+// 禁用form表单登录
+http.formLogin().disable();
+
+// 鉴权失败的处理器
+http.exceptionHandling().accessDeniedHandler(myAccessDeniedHandler);
+
+// 请求未认证时的处理器
+http.exceptionHandling().authenticationEntryPoint(ajaxAuthenticationEntryPoint);
+
+// spring security 禁止使用 session，使用 jwt令牌时，无需session配合使用了
+http.sessionManagement().sessionCreationPolicy(SessionCreationPolicy.STATELESS);
+
+// 添加自定义的 jwt令牌鉴权过滤器，在 UsernamePasswordAuthenticationFilter 之前执行
+http.addFilterBefore(jwtAuthenticationTokenFilter, UsernamePasswordAuthenticationFilter.class);
+```
+
+- 为我们使用了JWT，表明了我们的应用是一个前后端分离的应用，所以我们可以开启STATELESS禁止使用session。当然这并不绝对，前后端分离的应用通过一些办法也是可以使用session的，这不是本文的核心内容不做赘述。
+- 将我们的自定义`jwtAuthenticationTokenFilter`，加载到`UsernamePasswordAuthenticationFilter`的前面。
+
+#### 3.1.6、测试
+
+测试登录接口，即：获取token的接口。输入正确的用户名、密码即可获取token。
+![img](img/f33e5a19c89b173eba3a6fdd1659a80c_1507x719.png)
+下面我们访问一个我们定义的简单的接口“/hello”,但是不传递JWT令牌，结果是禁止访问。当我们将上一步返回的token，传递到header中，就能正常响应hello的接口结果。
+![img](img/2a8b5931728003e447ed415b629d5d07_1010x638.png)
+
+### 3.2、FormLogin 过滤器方式
+
+http://www.iocoder.cn/Fight/Separate-SpringBoot-SpringSecurity-JWT-RBAC-from-front-and-rear-to-achieve-user-stateless-request-authentication/?self
+
+https://blog.csdn.net/zzxzzxhao/article/details/83381876
+
+## 4、跨域
+
+参考文档：
+
+https://www.kancloud.cn/hanxt/springsecurity/1425049
+
+[http://www.zimug.com/other/springboot/spring-%e9%87%8c%e9%82%a3%e4%b9%88%e5%a4%9a%e7%a7%8d-cors-%e7%9a%84%e9%85%8d%e7%bd%ae%e6%96%b9%e5%bc%8f%ef%bc%8c%e5%88%b0%e5%ba%95%e6%9c%89%e4%bb%80%e4%b9%88%e5%8c%ba%e5%88%ab/.html](http://www.zimug.com/other/springboot/spring-里那么多种-cors-的配置方式，到底有什么区别/.html)
+
+https://www.kancloud.cn/hanxt/springboot2/1363318
+
+https://segmentfault.com/a/1190000019550329?utm_source=tag-newest
+
+https://segmentfault.com/a/1190000011145364
+
+### 4.1、什么是跨域访问
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
